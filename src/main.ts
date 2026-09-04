@@ -1,60 +1,83 @@
 import './style.css'
-import heroImg from './assets/hero.png'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import { setupCounter } from './counter.ts'
+import { Game } from './domain/game'
+import type { Direction } from './domain/types'
+import { Controls } from './input/controls'
+import { Renderer } from './render/renderer'
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+/** タブを離れて戻ってきた時に、溜まった時間で一気に落ちて即死しないようにする */
+const MAX_FRAME_MS = 100
 
-<div class="ticks"></div>
+function required<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector)
+  if (element === null) throw new Error(`${selector} が見つからない`)
+  return element
+}
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+const canvas = required<HTMLCanvasElement>('#board')
+const stage = required<HTMLElement>('#stage')
+const pad = required<HTMLElement>('#pad')
+const depthLabel = required<HTMLElement>('#depth')
+const finalDepthLabel = required<HTMLElement>('#final-depth')
+const overlay = required<HTMLElement>('#overlay')
+const retryButton = required<HTMLButtonElement>('#retry')
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+const DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right']
+const padKeys = new Map<Direction, HTMLElement>()
+for (const key of document.querySelectorAll<HTMLElement>('[data-dir]')) {
+  // dataset は string なので、素通しでキャストせず既知の 4 方向に照合する
+  const dir = DIRECTIONS.find((d) => d === key.dataset['dir'])
+  if (dir !== undefined) padKeys.set(dir, key)
+}
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+const renderer = new Renderer(canvas)
+const controls = new Controls()
+controls.attachPad(pad)
+controls.attachKeyboard(window)
+
+let game = new Game()
+
+function layout(): void {
+  const rect = stage.getBoundingClientRect()
+  renderer.resize(rect.width, rect.height)
+}
+window.addEventListener('resize', layout)
+window.addEventListener('orientationchange', layout)
+layout()
+
+function restart(): void {
+  game = new Game()
+  controls.reset()
+  overlay.hidden = true
+}
+retryButton.addEventListener('click', restart)
+
+let shownDepth = -1
+let shownGameover = false
+let lastFrame = performance.now()
+
+function frame(now: number): void {
+  const dt = Math.min(now - lastFrame, MAX_FRAME_MS)
+  lastFrame = now
+
+  const direction = controls.direction
+  game.update(dt, direction)
+  renderer.draw(game)
+
+  // DOM は変わった時だけ触る。毎フレーム書き換えるとレイアウトが走る
+  if (game.maxDepth !== shownDepth) {
+    shownDepth = game.maxDepth
+    depthLabel.textContent = String(shownDepth)
+  }
+  const isGameover = game.state === 'gameover'
+  if (isGameover !== shownGameover) {
+    shownGameover = isGameover
+    overlay.hidden = !isGameover
+    finalDepthLabel.textContent = String(game.maxDepth)
+  }
+  for (const [dir, key] of padKeys) {
+    key.classList.toggle('is-active', dir === direction)
+  }
+
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
