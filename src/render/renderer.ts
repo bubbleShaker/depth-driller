@@ -1,6 +1,23 @@
-import type { Game } from '../domain/game'
+import { FLOAT_TICKS_BEFORE_FALL } from '../domain/gravity'
 import { GRID_WIDTH, SURFACE_ROWS } from '../domain/grid'
+import type { Cell, Direction } from '../domain/types'
 import { BLOCK_COLORS, PLAYER_COLORS, SKY_COLOR, caveColor } from './palette'
+
+/**
+ * Renderer が盤面について知っていればよいことだけを並べた読み取り口。
+ * Game そのものを受け取ると、描画のついでに盤面を作ったり動かしたりできてしまう。
+ * ここを通しておけば、描画が状態を変えないことが型で保証される。
+ */
+export interface BoardView {
+  readonly grid: { at(x: number, y: number): Readonly<Cell> }
+  readonly renderX: number
+  readonly renderY: number
+  readonly facing: Direction
+  readonly depth: number
+  readonly fallProgress: number
+  readonly digTarget: { readonly x: number; readonly y: number } | null
+  readonly state: 'playing' | 'gameover'
+}
 
 /** プレイヤーを画面のどのあたりに置くか。下を広く見せたいので上寄り */
 const CAMERA_ANCHOR = 0.34
@@ -52,8 +69,7 @@ export class Renderer {
     this.#ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
-  draw(game: Game): void {
-    const ctx = this.#ctx
+  draw(game: BoardView): void {
     const cell = this.#cell
     const rowsVisible = this.#height / cell
 
@@ -65,7 +81,6 @@ export class Renderer {
 
     const firstRow = Math.max(0, Math.floor(cameraY) - 1)
     const lastRow = Math.ceil(cameraY + rowsVisible) + 1
-    game.grid.ensureDepth(lastRow)
 
     for (let y = firstRow; y <= lastRow; y++) {
       for (let x = 0; x < GRID_WIDTH; x++) {
@@ -73,20 +88,19 @@ export class Renderer {
         if (block === null) continue
         // 落ちている最中のブロックは、1 つ上のマスから降りてくる途中に見せる
         const drawRow = block.fell ? y - 1 + game.fallProgress : y
-        this.#drawBlock(this.#originX + x * cell, toPx(drawRow), block.color)
+        // 支えを失って浮いているブロックは震わせる。落ちてくる前の唯一の予告なので、
+        // 落下が近いほど揺れを大きくして「そろそろ来る」を伝える
+        const urgency = block.fell ? 0 : block.floatTicks / FLOAT_TICKS_BEFORE_FALL
+        const wobble = urgency * Math.sin(performance.now() / 26 + y) * cell * 0.07
+        this.#drawBlock(this.#originX + x * cell + wobble, toPx(drawRow), block.color)
       }
     }
 
     this.#drawPlayer(game, toPx)
-
-    if (game.state === 'gameover') {
-      ctx.fillStyle = 'rgba(8, 10, 16, 0.55)'
-      ctx.fillRect(0, 0, this.#width, this.#height)
-    }
   }
 
   #drawBackground(
-    game: Game,
+    game: BoardView,
     cameraY: number,
     rowsVisible: number,
     toPx: (row: number) => number,
@@ -160,7 +174,7 @@ export class Renderer {
     ctx.fill()
   }
 
-  #drawPlayer(game: Game, toPx: (row: number) => number): void {
+  #drawPlayer(game: BoardView, toPx: (row: number) => number): void {
     const ctx = this.#ctx
     const cell = this.#cell
     const px = this.#originX + game.renderX * cell
@@ -202,7 +216,7 @@ export class Renderer {
     ctx.restore()
   }
 
-  #drawDrill(game: Game): void {
+  #drawDrill(game: BoardView): void {
     const ctx = this.#ctx
     const cell = this.#cell
     const angle = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0 }[game.facing]

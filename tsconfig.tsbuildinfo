@@ -1,1 +1,0 @@
-{"root":["./src/main.ts","./src/domain/game.test.ts","./src/domain/game.ts","./src/domain/gravity.test.ts","./src/domain/gravity.ts","./src/domain/grid.ts","./src/domain/player.test.ts","./src/domain/player.ts","./src/domain/testing.ts","./src/domain/types.ts","./src/input/controls.ts","./src/render/palette.ts","./src/render/renderer.ts"],"version":"6.0.3"}

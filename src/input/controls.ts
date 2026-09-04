@@ -25,11 +25,11 @@ export class Controls {
   #direction: Direction | null = null
   #pointerId: number | null = null
   #keys = new Set<Direction>()
+  /** キーボードで最後に押された方向。掘る対象は 1 つなので、後から押した方を優先する */
+  #lastKey: Direction | null = null
 
   get direction(): Direction | null {
-    // キーボードは後から押した方を優先したいが、掘る対象は 1 つなので最後の 1 つで足りる
-    const key = [...this.#keys].at(-1)
-    return this.#direction ?? key ?? null
+    return this.#direction ?? this.#lastKey
   }
 
   attachPad(pad: HTMLElement): void {
@@ -71,20 +71,28 @@ export class Controls {
       const dir = KEY_MAP[event.code]
       if (dir === undefined) return
       event.preventDefault()
-      this.#keys.delete(dir)
       this.#keys.add(dir)
+      this.#lastKey = dir
     })
     target.addEventListener('keyup', (event) => {
       const dir = KEY_MAP[event.code]
-      if (dir !== undefined) this.#keys.delete(dir)
+      if (dir === undefined) return
+      this.#keys.delete(dir)
+      // 離したのが最後に押したキーなら、まだ押されている方向に戻す
+      if (this.#lastKey === dir) this.#lastKey = [...this.#keys].at(-1) ?? null
     })
-    target.addEventListener('blur', () => this.#keys.clear())
+    target.addEventListener('blur', () => this.#clearKeys())
   }
 
   /** 押しっぱなしの状態を消す。ゲームをやり直す時に持ち越さないため */
   reset(): void {
     this.#direction = null
     this.#pointerId = null
+    this.#clearKeys()
+  }
+
+  #clearKeys(): void {
     this.#keys.clear()
+    this.#lastKey = null
   }
 }

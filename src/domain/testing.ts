@@ -13,7 +13,7 @@ export function makeGrid(rows: string[]): Grid {
       throw new Error(`行 ${y} の幅が ${row.length}。${GRID_WIDTH} で書くこと`)
     }
     ;[...row].forEach((ch, x) => {
-      const cell: Cell = ch === '.' ? null : { color: Number(ch), fell: false }
+      const cell: Cell = ch === '.' ? null : { color: Number(ch), fell: false, floatTicks: 0 }
       grid.set(x, y, cell)
     })
   })

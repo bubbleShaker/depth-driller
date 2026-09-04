@@ -6,15 +6,23 @@ export interface CellPos {
 }
 
 /**
+ * 支えを失ってから実際に落ち始めるまでのティック数。
+ * 0 にすると掘った瞬間に落ちてきて避けようがなく、ただの理不尽になる。
+ * 8（約 0.7 秒）は、横へ掘り進みながらでも下へ逃げ直せる長さとして実測で選んだ。
+ */
+export const FLOAT_TICKS_BEFORE_FALL = 8
+
+/**
  * 支えを失った塊を 1 マスだけ落とす。
  *
  * 落ちる単位は「同じ色で上下左右につながったひとかたまり」。
  * 色が違うブロックは互いを支えるが、一緒には落ちない。原作でブロックを 1 つ掘ると
  * 同色の塊がまとめて降ってくるのはこのため。
  *
- * fromY..toY は計算する窓。窓の外は「まだ生成していない土」かもしれず、
- * 空だと決めつけると盤面全体が落下してしまう。そこで窓の下にはみ出した塊は
- * 支えられているものとして扱う。窓はプレイヤーの周りに十分な余白を取って渡すこと。
+ * fromY..toY は計算する窓。窓の外のことは分からないので、上下どちらであれ
+ * 窓からはみ出した塊は「支えられている」ものとして動かさない。
+ * 空だと決めつけると盤面が丸ごと落ちてしまうし、塊を窓で切って落とすと
+ * 半分だけが落ちて穴が空く。窓はプレイヤーの周りに十分な余白を取って渡すこと。
  *
  * @returns 落ちたセルの移動後の位置
  */
@@ -25,6 +33,8 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
   // 窓の中のブロックを同色の塊に分ける
   const componentOf = new Map<number, number>()
   const components: CellPos[][] = []
+  /** 窓の上へ続いている塊。全体が見えていないので落とせない */
+  const openTop: boolean[] = []
   for (let y = top; y <= toY; y++) {
     for (let x = 0; x < GRID_WIDTH; x++) {
       const cell = grid.at(x, y)
@@ -33,6 +43,7 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
       const id = components.length
       const cells: CellPos[] = []
       const stack: CellPos[] = [{ x, y }]
+      let touchesTop = false
       componentOf.set(key(x, y), id)
       while (stack.length > 0) {
         const pos = stack.pop()!
@@ -43,7 +54,13 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
           [pos.x, pos.y + 1],
           [pos.x, pos.y - 1],
         ] as const) {
-          if (nx < 0 || nx >= GRID_WIDTH || ny < top || ny > toY) continue
+          if (nx < 0 || nx >= GRID_WIDTH || ny > toY) continue
+          if (ny < top) {
+            // 窓の外までつながっているかだけ見て、探索は広げない
+            const above = grid.at(nx, ny)
+            if (above !== null && above.color === cell.color) touchesTop = true
+            continue
+          }
           if (componentOf.has(key(nx, ny))) continue
           const neighbor = grid.at(nx, ny)
           if (neighbor === null || neighbor.color !== cell.color) continue
@@ -52,6 +69,7 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
         }
       }
       components.push(cells)
+      openTop.push(touchesTop)
     }
   }
 
@@ -60,6 +78,11 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
   const riders: number[][] = components.map(() => [])
   const settled: number[] = []
   components.forEach((cells, id) => {
+    if (openTop[id] === true) {
+      supported[id] = true
+      settled.push(id)
+      return
+    }
     for (const { x, y } of cells) {
       const below = y + 1
       if (below > toY) {
@@ -88,20 +111,28 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
 
   // 落ちるセルを一度すべて消してから書き戻す。
   // 1 つずつ動かすと、同じ塊の上のセルが下のセルを踏み潰してしまう
-  const falling: { pos: CellPos; color: number }[] = []
+  const falling: { pos: CellPos; color: number; floatTicks: number }[] = []
   components.forEach((cells, id) => {
-    if (supported[id]) return
     for (const pos of cells) {
       const cell = grid.at(pos.x, pos.y)
-      if (cell !== null) falling.push({ pos, color: cell.color })
+      if (cell === null) continue
+      if (supported[id] === true) {
+        cell.floatTicks = 0
+        continue
+      }
+      // 浮いている時間を数え、猶予を超えたものだけが落ち始める
+      cell.floatTicks += 1
+      if (cell.floatTicks > FLOAT_TICKS_BEFORE_FALL) {
+        falling.push({ pos, color: cell.color, floatTicks: cell.floatTicks })
+      }
     }
   })
   for (const { pos } of falling) grid.set(pos.x, pos.y, null)
 
   const landed: CellPos[] = []
-  for (const { pos, color } of falling) {
+  for (const { pos, color, floatTicks } of falling) {
     const to = { x: pos.x, y: pos.y + 1 }
-    grid.set(to.x, to.y, { color, fell: true })
+    grid.set(to.x, to.y, { color, fell: true, floatTicks })
     landed.push(to)
   }
 

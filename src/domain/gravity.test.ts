@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { stepGravity } from './gravity'
+import { FLOAT_TICKS_BEFORE_FALL, stepGravity } from './gravity'
 import { dumpGrid, makeGrid } from './testing'
 
 /**
  * 窓の下端は「未生成の土に支えられている」扱いなので、
  * 落としたい塊より下に必ず余白の行を置いてから toY を指定する。
  */
-function fall(rows: string[], times = 1): string[] {
+function fall(rows: string[], times = FLOAT_TICKS_BEFORE_FALL + 1): string[] {
   const grid = makeGrid(rows)
   for (let i = 0; i < times; i++) stepGravity(grid, 0, rows.length - 2)
   return dumpGrid(grid, rows.length)
@@ -37,6 +37,23 @@ describe('stepGravity', () => {
     ).toEqual([
       '...1....', //
       '...2....',
+      '........',
+    ])
+  })
+
+  it('支えを失ってもすぐには落ちず、猶予のあいだ浮いている', () => {
+    expect(
+      fall(
+        [
+          '...1....', //
+          '........',
+          '........',
+        ],
+        FLOAT_TICKS_BEFORE_FALL,
+      ),
+    ).toEqual([
+      '...1....', //
+      '........',
       '........',
     ])
   })
@@ -111,7 +128,7 @@ describe('stepGravity', () => {
           '........',
           '........',
         ],
-        5,
+        FLOAT_TICKS_BEFORE_FALL + 5,
       ),
     ).toEqual([
       '........', //
@@ -126,10 +143,26 @@ describe('stepGravity', () => {
       '........',
       '........',
     ])
-    stepGravity(grid, 0, 1)
+    for (let i = 0; i <= FLOAT_TICKS_BEFORE_FALL; i++) stepGravity(grid, 0, 1)
     expect(grid.at(3, 1)?.fell).toBe(true)
     stepGravity(grid, 0, 1)
     expect(grid.at(3, 1)?.fell).toBe(false)
+  })
+
+  it('窓の上へ続いている塊は、全体が見えないので落とさない', () => {
+    const grid = makeGrid([
+      '...1....', //
+      '...1....',
+      '........',
+      '........',
+    ])
+    for (let i = 0; i <= FLOAT_TICKS_BEFORE_FALL; i++) stepGravity(grid, 1, 2)
+    expect(dumpGrid(grid, 4)).toEqual([
+      '...1....', //
+      '...1....',
+      '........',
+      '........',
+    ])
   })
 
   it('落ちた先の位置を返す', () => {
@@ -138,6 +171,10 @@ describe('stepGravity', () => {
       '........',
       '........',
     ])
+    // 猶予のあいだは何も動かず、使い切った次のティックで落ちる
+    for (let i = 0; i < FLOAT_TICKS_BEFORE_FALL; i++) {
+      expect(stepGravity(grid, 0, 1)).toEqual([])
+    }
     expect(stepGravity(grid, 0, 1)).toEqual([{ x: 3, y: 1 }])
   })
 })

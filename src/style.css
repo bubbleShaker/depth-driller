@@ -70,6 +70,8 @@ body {
 #overlay {
   position: absolute;
   inset: 0;
+  /* 盤面の上に重ねるので、ここで暗く落とさないと文字がブロックに埋もれる */
+  background: rgba(10, 8, 6, 0.78);
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -10,8 +10,12 @@ describe('decideAction', () => {
     '11111111',
   ])
 
-  it('ブロックがあれば掘る', () => {
-    expect(decideAction(grid, 1, 1, 'down')).toEqual({ kind: 'dig', x: 1, y: 2 })
+  it('真下のブロックは掘るだけで、進むのは重力に任せる', () => {
+    expect(decideAction(grid, 1, 1, 'down')).toEqual({ kind: 'dig', x: 1, y: 2, enter: false })
+  })
+
+  it('横のブロックは掘りながらそのマスへ入る', () => {
+    expect(decideAction(grid, 1, 2, 'right')).toEqual({ kind: 'dig', x: 2, y: 2, enter: true })
   })
 
   it('空いていれば横に歩く', () => {
@@ -30,7 +34,7 @@ describe('decideAction', () => {
     expect(decideAction(grid, 1, 1, 'up')).toEqual({ kind: 'none' })
   })
 
-  it('真上のブロックは掘れる', () => {
-    expect(decideAction(grid, 1, 2, 'up')).toEqual({ kind: 'dig', x: 1, y: 1 })
+  it('真上のブロックは掘れるが、登りはしない', () => {
+    expect(decideAction(grid, 1, 2, 'up')).toEqual({ kind: 'dig', x: 1, y: 1, enter: false })
   })
 })

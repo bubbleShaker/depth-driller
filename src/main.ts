@@ -21,9 +21,12 @@ const finalDepthLabel = required<HTMLElement>('#final-depth')
 const overlay = required<HTMLElement>('#overlay')
 const retryButton = required<HTMLButtonElement>('#retry')
 
+const DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right']
 const padKeys = new Map<Direction, HTMLElement>()
 for (const key of document.querySelectorAll<HTMLElement>('[data-dir]')) {
-  padKeys.set(key.dataset['dir'] as Direction, key)
+  // dataset は string なので、素通しでキャストせず既知の 4 方向に照合する
+  const dir = DIRECTIONS.find((d) => d === key.dataset['dir'])
+  if (dir !== undefined) padKeys.set(dir, key)
 }
 
 const renderer = new Renderer(canvas)

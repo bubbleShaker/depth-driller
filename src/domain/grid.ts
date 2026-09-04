@@ -58,6 +58,7 @@ export class Grid {
     return Array.from({ length: GRID_WIDTH }, () => ({
       color: Math.floor(this.#random() * COLOR_COUNT),
       fell: false,
+      floatTicks: 0,
     }))
   }
 }

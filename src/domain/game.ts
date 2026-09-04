@@ -14,6 +14,13 @@ export const DIG_DURATION_MS = 150
  */
 const GRAVITY_MARGIN = 24
 
+/**
+ * どこまで先に土を作っておくか。
+ * 未生成の行は「空」と見分けがつかないので、重力の窓と描画の範囲の
+ * どちらよりも深くまで作っておかないと、盤面が下へ抜け落ちる。
+ */
+const LOOKAHEAD = 48
+
 export type GameState = 'playing' | 'gameover'
 
 /**
@@ -43,7 +50,7 @@ export class Game {
     this.y = SURFACE_ROWS - 1
     this.#prevX = this.x
     this.#prevY = this.y
-    this.grid.ensureDepth(this.y + GRAVITY_MARGIN + 1)
+    this.grid.ensureDepth(this.y + LOOKAHEAD)
   }
 
   /** 地表を 0 とした現在の深さ（マス） */
@@ -83,7 +90,6 @@ export class Game {
   update(dtMs: number, dir: Direction | null): void {
     if (this.state === 'gameover') return
 
-    this.grid.ensureDepth(this.y + GRAVITY_MARGIN + 1)
     this.#actionElapsed += dtMs
 
     this.#fallElapsed += dtMs
@@ -103,15 +109,24 @@ export class Game {
 
   /** @returns 潰されたら true */
   #tickFall(): boolean {
+    // 1 回の update でティックが何度も回ることがある。
+    // 生成はティックごとにやり直さないと、深くなった窓が未生成域にはみ出す
+    this.grid.ensureDepth(this.y + LOOKAHEAD)
+
+    // 落ちるかどうかは、ブロックが動く前の足元で決める。
+    // ブロックと同じ速さで落ちている間は、真上から追いつかれない
+    const falls = this.isAirborne
     const landed = stepGravity(this.grid, this.y - GRAVITY_MARGIN, this.y + GRAVITY_MARGIN)
+
+    if (falls && !this.grid.isBlocked(this.x, this.y + 1)) {
+      this.#moveTo(this.x, this.y + 1, FALL_INTERVAL_MS)
+    }
 
     // 落ちてきたブロックが自分のいるマスに入った = 潰された
     if (landed.some((p) => p.x === this.x && p.y === this.y)) {
       this.state = 'gameover'
       return true
     }
-
-    if (this.isAirborne) this.#moveTo(this.x, this.y + 1, FALL_INTERVAL_MS)
     return false
   }
 
@@ -122,7 +137,8 @@ export class Game {
     if (action.kind === 'dig') {
       this.grid.set(action.x, action.y, null)
       this.#digTarget = { x: action.x, y: action.y }
-      this.#beginAction(DIG_DURATION_MS)
+      if (action.enter) this.#moveTo(action.x, action.y, DIG_DURATION_MS)
+      else this.#beginAction(DIG_DURATION_MS)
       return
     }
     this.#digTarget = null
