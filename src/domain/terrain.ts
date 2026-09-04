@@ -11,7 +11,7 @@ import { COLOR_COUNT, type Cell } from './types'
  * どこを崩すかを考える遊びになる。
  * 20 シードの試走では 0.7 が最も点の入りが良かった（13/20 で得点、中央値 90 点）。
  */
-export const CLUSTER_CHANCE = 0.7
+const CLUSTER_CHANCE = 0.7
 
 /**
  * 土の作り方。

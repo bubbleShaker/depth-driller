@@ -1,6 +1,6 @@
 import { splitIntoChunks, type CellPos } from './chunks'
 import { GRID_WIDTH, type Grid } from './grid'
-import type { Cell } from './types'
+import type { Block } from './types'
 
 export interface FallResult {
   /** このティックで落ちたセルの、移動後の位置 */
@@ -129,7 +129,7 @@ function applyFall(
   key: (x: number, y: number) => number,
 ): CellPos[] {
   // 一度すべて消してから書き戻す。1 つずつ動かすと、同じ塊の上のセルが下のセルを踏み潰す
-  const falling: { pos: CellPos; cell: NonNullable<Cell> }[] = []
+  const falling: { pos: CellPos; cell: Block }[] = []
   chunks.forEach((chunk, id) => {
     if (held[id] === true) return
     for (const pos of chunk.cells) {
@@ -145,8 +145,10 @@ function applyFall(
     // ブロックを消してしまうより、その場に戻す方がまだ被害が小さい
     const blocked = grid.at(pos.x, pos.y + 1) !== null
     const to = blocked ? pos : { x: pos.x, y: pos.y + 1 }
-    // セルを作り直さず運ぶ。状態が増えた時に書き潰さないため
-    grid.set(to.x, to.y, { ...cell, fell: !blocked })
+    // 同じオブジェクトのまま運ぶ。作り直すと状態を書き潰すうえ、
+    // 消える予約が「そこにあったセル」を見失う
+    cell.fell = !blocked
+    grid.set(to.x, to.y, cell)
     if (!blocked) landed.push(to)
   }
 

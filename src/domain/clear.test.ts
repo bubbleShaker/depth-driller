@@ -12,8 +12,8 @@ import { createTerrain } from './terrain'
  */
 function clearAll(rows: string[]): string[] {
   const grid = makeGrid(rows)
-  const clears = new ClearScheduler()
-  for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(grid, 0, rows.length)
+  const clears = new ClearScheduler(grid)
+  for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(0, rows.length)
   return dumpGrid(grid, rows.length)
 }
 
@@ -70,15 +70,15 @@ describe('stepClear', () => {
 
   it('印がついてから点滅する分だけ盤面に残る', () => {
     const grid = makeGrid(['1111....'])
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
-    clears.step(grid, 0, 1)
+    clears.step(0, 1)
     expect(grid.at(0, 0)?.clearTicks).toBe(CLEAR_DELAY_TICKS)
 
-    for (let i = 0; i < CLEAR_DELAY_TICKS - 1; i++) clears.step(grid, 0, 1)
+    for (let i = 0; i < CLEAR_DELAY_TICKS - 1; i++) clears.step(0, 1)
     expect(grid.at(0, 0)).not.toBeNull()
 
-    clears.step(grid, 0, 1)
+    clears.step(0, 1)
     expect(grid.at(0, 0)).toBeNull()
   })
 
@@ -88,9 +88,9 @@ describe('stepClear', () => {
       '........',
     ])
     for (const x of [0, 1, 2, 3]) grid.at(x, 0)!.floatTicks = 1
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
-    clears.step(grid, 0, 2)
+    clears.step(0, 2)
 
     expect(grid.at(0, 0)?.clearTicks).toBe(0)
   })
@@ -100,9 +100,9 @@ describe('stepClear', () => {
       '11......', //
       '11......',
     ])
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
-    for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(grid, 1, 2)
+    for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(1, 2)
 
     expect(dumpGrid(grid, 2)).toEqual([
       '11......', //
@@ -117,10 +117,10 @@ describe('stepClear', () => {
       '.1......',
       '.1......',
     ])
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
     // 窓を盤面の途中で切る。塊は 4 つあるが、下がどこまで続くか分からない
-    for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(grid, 0, 3)
+    for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(0, 3)
 
     expect(dumpGrid(grid, 4)).toEqual([
       '.1......', //
@@ -141,13 +141,13 @@ describe('stepClear', () => {
       '.2......',
       '.3......',
     ])
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
-    clears.step(grid, 0, 5)
+    clears.step(0, 5)
     expect(grid.at(1, 0)?.clearTicks).toBe(CLEAR_DELAY_TICKS)
 
     // 窓を下へずらす。塊の上半分はもう窓の外
-    for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(grid, 3, 5)
+    for (let i = 0; i <= CLEAR_DELAY_TICKS; i++) clears.step(3, 5)
 
     expect(dumpGrid(grid, 6)).toEqual([
       '........', //
@@ -172,16 +172,16 @@ describe('stepClear', () => {
     ])
     // 2 はもう落下中。点滅が終わる前に穴へ届く
     grid.at(0, 0)!.floatTicks = FLOAT_TICKS_BEFORE_FALL
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
-    clears.step(grid, 0, 5)
+    clears.step(0, 5)
     expect(grid.at(0, 3)?.clearTicks).toBe(CLEAR_DELAY_TICKS)
 
     // 点滅中の 1 つを掘る。そこへ上の 2 が落ちてくる
     grid.set(0, 3, null)
     for (let tick = 0; tick < 30; tick++) {
       stepGravity(grid, 0, 5)
-      clears.step(grid, 0, 5)
+      clears.step(0, 5)
     }
 
     // 1 は消えたが、落ちてきた 2 は残っている
@@ -199,11 +199,11 @@ describe('stepClear', () => {
       '01230123',
     ])
 
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
     let times = 0
     for (let tick = 0; tick < 60; tick++) {
       stepGravity(grid, 0, 5)
-      if (clears.step(grid, 0, 5).removed > 0) times += 1
+      if (clears.step(0, 5).removed.length > 0) times += 1
     }
 
     expect(times).toBe(2)
@@ -222,9 +222,9 @@ describe('stepClear', () => {
     const grid = new Grid(createTerrain(seededRandom(5)))
     grid.ensureDepth(40)
     const before = countBlocks(grid, 0, 40)
-    const clears = new ClearScheduler()
+    const clears = new ClearScheduler(grid)
 
-    for (let tick = 0; tick <= CLEAR_DELAY_TICKS * 2; tick++) clears.step(grid, 0, 39)
+    for (let tick = 0; tick <= CLEAR_DELAY_TICKS * 2; tick++) clears.step(0, 39)
 
     expect(countBlocks(grid, 0, 40)).toBe(before)
   })

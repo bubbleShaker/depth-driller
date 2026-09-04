@@ -36,6 +36,8 @@ function scoreFor(removed: number, chain: number): number {
   return removed * 10 * chain
 }
 
+const seedKey = (x: number, y: number) => y * GRID_WIDTH + x
+
 /**
  * ルールの本体。Canvas も DOM も知らないので、盤面の挙動だけを単体テストできる。
  * 呼び出し側は毎フレーム update に経過時間と押されている方向を渡す。
@@ -64,13 +66,18 @@ export class Game {
   #fallElapsed = 0
   #digTarget: CellPos | null = null
   /** 消えると決まった塊。窓がずれても最後まで一緒に消えるよう、盤面の外で持つ */
-  readonly #clears = new ClearScheduler()
-  /** 直前に消した跡の列。ここが動いている間だけ連鎖が続く */
-  #chainColumns = new Set<number>()
+  readonly #clears: ClearScheduler
+  /**
+   * 直前に消した跡のマス。
+   * ここへ落ちてきたブロックが揃った時だけ「連鎖」と呼べる。
+   * 列だけで見ていると、同じ列の離れた場所で偶然続いた消去まで連鎖になる
+   */
+  #chainSeeds = new Set<number>()
 
   /** 土の作り方を差し替えられる。テストでは手で書いた盤面を渡せる */
   constructor(rows: RowGenerator = createTerrain()) {
     this.grid = new Grid(rows)
+    this.#clears = new ClearScheduler(this.grid)
     this.x = Math.floor(GRID_WIDTH / 2)
     this.y = SURFACE_ROWS - 1
     this.#prevX = this.x
@@ -157,29 +164,37 @@ export class Game {
     // 落ちてきたブロックが自分のいるマスに入った = 潰された
     if (fall.landed.some((p) => p.x === this.x && p.y === this.y)) {
       this.state = 'gameover'
-      this.chain = 0
+      this.#endChain()
       return true
     }
 
-    const cleared = this.#clears.step(this.grid, top, bottom)
-    if (cleared.removed > 0) {
-      // 前に消した跡と同じ列で起きた消去だけを連鎖と数える。
+    // 消した跡へ入ってきたブロックは、連鎖の担い手として印を引き継ぐ
+    for (const pos of fall.landed) {
+      if (this.#chainSeeds.has(seedKey(pos.x, pos.y - 1))) this.#chainSeeds.add(seedKey(pos.x, pos.y))
+    }
+
+    const cleared = this.#clears.step(top, bottom)
+    if (cleared.removed.length > 0) {
+      // 前に消した跡に関わる消去だけを連鎖と数える。
       // 「続けて消えた」だけで伸ばすと、離れた場所の偶然まで連鎖になる
-      const followsUp = cleared.removedColumns.some((x) => this.#chainColumns.has(x))
+      const followsUp = cleared.removed.some((p) => this.#chainSeeds.has(seedKey(p.x, p.y)))
       this.chain = followsUp ? this.chain + 1 : 1
-      this.score += scoreFor(cleared.removed, this.chain)
-      this.#chainColumns = new Set(cleared.removedColumns)
+      this.score += scoreFor(cleared.removed.length, this.chain)
+      this.#chainSeeds = new Set(cleared.removed.map((p) => seedKey(p.x, p.y)))
       return false
     }
     if (this.chain > 0) {
       // 消した跡へ向かう落下が止まったら、そこで連鎖は途切れる
-      const stillMoving = [...this.#chainColumns].some((x) => fall.unsupportedColumns.has(x))
-      if (!stillMoving && cleared.pending === 0) {
-        this.chain = 0
-        this.#chainColumns.clear()
-      }
+      const columns = new Set([...this.#chainSeeds].map((k) => k % GRID_WIDTH))
+      const stillMoving = [...columns].some((x) => fall.unsupportedColumns.has(x))
+      if (!stillMoving && cleared.pending === 0) this.#endChain()
     }
     return false
+  }
+
+  #endChain(): void {
+    this.chain = 0
+    this.#chainSeeds.clear()
   }
 
   #startAction(dir: Direction): void {

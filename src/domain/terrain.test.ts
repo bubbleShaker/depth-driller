@@ -19,7 +19,9 @@ describe('createTerrain', () => {
   // pickColor には「どの色も駄目なら諦めて置く」保険があるので、性質ではなく統計で見る
   it('生成しただけでは 4 つ揃わない', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
-      expect(survey(seed).biggest).toBeLessThan(CLEAR_MIN_SIZE)
+      const { biggest, count } = survey(seed)
+      expect(count).toBeGreaterThan(0)
+      expect(biggest).toBeLessThan(CLEAR_MIN_SIZE)
     }
   })
 

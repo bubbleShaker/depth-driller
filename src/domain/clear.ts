@@ -1,6 +1,6 @@
 import { splitIntoChunks, type CellPos } from './chunks'
 import type { Grid } from './grid'
-import type { Cell } from './types'
+import type { Block } from './types'
 
 /** 何個つながったら消えるか */
 export const CLEAR_MIN_SIZE = 4
@@ -12,17 +12,15 @@ export const CLEAR_MIN_SIZE = 4
 export const CLEAR_DELAY_TICKS = 6
 
 export interface ClearResult {
-  /** このティックで盤面から取り除いたセルの数 */
-  removed: number
-  /** 取り除いたセルがあった列。連鎖が続いているかの判断に使う */
-  removedColumns: number[]
+  /** このティックで盤面から取り除いたセルの位置。連鎖が続いているかの判断に使う */
+  removed: CellPos[]
   /** 消えるのを待っているセルの数。0 なら盤面に消し掛けのものは無い */
   pending: number
 }
 
 /** 消えると決まった塊。座標だけでなく、その時そこにあったセルも覚えておく */
 interface ClearOrder {
-  cells: { pos: CellPos; cell: NonNullable<Cell> }[]
+  cells: { pos: CellPos; cell: Block }[]
   ticksLeft: number
 }
 
@@ -40,7 +38,13 @@ interface ClearOrder {
  * そこで「その時そこにあったセル」まで覚えて、消す直前に本人か確かめる。
  */
 export class ClearScheduler {
+  readonly #grid: Grid
   readonly #orders: ClearOrder[] = []
+
+  /** 予約は特定の盤面のセルを指すので、盤面ごとに 1 つ持つ */
+  constructor(grid: Grid) {
+    this.#grid = grid
+  }
 
   /** 消えるのを待っているセルの数 */
   get pending(): number {
@@ -55,40 +59,40 @@ export class ClearScheduler {
    * 浮いているかは [[stepGravity]] が書いた `floatTicks` で分かるので、
    * 先に重力を進めてから呼ぶこと。
    */
-  step(grid: Grid, fromY: number, toY: number): ClearResult {
-    const { removed, removedColumns } = this.#advance(grid)
-    this.#reserve(grid, fromY, toY)
-    return { removed, removedColumns: [...removedColumns], pending: this.pending }
+  step(fromY: number, toY: number): ClearResult {
+    const removed = this.#advance()
+    this.#reserve(fromY, toY)
+    return { removed, pending: this.pending }
   }
 
   /** 点滅を進め、待ち時間が尽きた塊を盤面から取り除く */
-  #advance(grid: Grid): { removed: number; removedColumns: Set<number> } {
-    let removed = 0
-    const removedColumns = new Set<number>()
+  #advance(): CellPos[] {
+    const grid = this.#grid
+    const removed: CellPos[] = []
 
     for (let i = this.#orders.length - 1; i >= 0; i--) {
       const order = this.#orders[i]!
       order.ticksLeft -= 1
+      // 掘られた跡に別のブロックが入っていることがある。本人でなければもう預かっていない
+      order.cells = order.cells.filter(({ pos, cell }) => grid.at(pos.x, pos.y) === cell)
 
-      for (const { pos, cell } of order.cells) {
-        // 掘られた跡に別のブロックが入っていることがある。本人でなければ手を出さない
-        if (grid.at(pos.x, pos.y) !== cell) continue
-        if (order.ticksLeft > 0) {
-          cell.clearTicks = order.ticksLeft
-          continue
-        }
-        grid.set(pos.x, pos.y, null)
-        removed += 1
-        removedColumns.add(pos.x)
+      if (order.ticksLeft > 0) {
+        for (const { cell } of order.cells) cell.clearTicks = order.ticksLeft
+        continue
       }
 
-      if (order.ticksLeft <= 0) this.#orders.splice(i, 1)
+      for (const { pos } of order.cells) {
+        grid.set(pos.x, pos.y, null)
+        removed.push(pos)
+      }
+      this.#orders.splice(i, 1)
     }
-    return { removed, removedColumns }
+    return removed
   }
 
   /** 新しく揃った塊に印をつける */
-  #reserve(grid: Grid, fromY: number, toY: number): void {
+  #reserve(fromY: number, toY: number): void {
+    const grid = this.#grid
     for (const chunk of splitIntoChunks(grid, fromY, toY).chunks) {
       if (chunk.cells.length < CLEAR_MIN_SIZE) continue
       // 窓からはみ出した塊は全体の大きさが分からない。落下と同じく手を出さない

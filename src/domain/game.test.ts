@@ -5,9 +5,12 @@ import { GRID_WIDTH, emptyWorld, type Grid } from './grid'
 import { block, seededRandom } from './testing'
 import { createTerrain } from './terrain'
 
-/** 隣どうしが同じ色にならない柱。支えにはなるが、それ自体は消えない */
+/**
+ * 支えにするための土。隣どうしが必ず違う色になるので、それ自体は消えない。
+ * 色 2 と 3 しか使わないので、テストで消したい塊には 0 と 1 を使うこと
+ */
 function pillar(grid: Grid, x: number, fromY: number, toY: number): void {
-  for (let y = fromY; y <= toY; y++) grid.set(x, y, block(y % 4))
+  for (let y = fromY; y <= toY; y++) grid.set(x, y, block((x + y) % 2 === 0 ? 2 : 3))
 }
 
 function paint(grid: Grid, cells: [number, number][], color: number): void {
@@ -167,6 +170,44 @@ describe('Game', () => {
     paint(grid, [[6, 19], [6, 20], [6, 21]], 1)
     paint(grid, [[6, 17]], 1)
     grid.at(6, 17)!.floatTicks = FLOAT_TICKS_BEFORE_FALL
+
+    for (let t = 0; t < 4000; t += 16) game.update(16, null)
+
+    expect(game.score).toBe(80)
+  })
+
+  it('消した跡に落ちてきたブロックが揃えば連鎖になる', () => {
+    const game = new Game(emptyWorld)
+    const grid = game.grid
+    pillar(grid, Math.floor(GRID_WIDTH / 2), 2, 30)
+    pillar(grid, 0, 22, 30)
+    for (const x of [1, 2, 3]) pillar(grid, x, 21, 30)
+
+    // 横 4 つが消える → 上の縦 3 つが落ちる → 下の 1 つとつながって 4 つになる
+    paint(grid, [[0, 17], [0, 18], [0, 19]], 1)
+    paint(grid, [[0, 20], [1, 20], [2, 20], [3, 20]], 0)
+    paint(grid, [[0, 21]], 1)
+
+    for (let t = 0; t < 4000; t += 16) game.update(16, null)
+
+    // 1 回目は 40 点、跡に落ちて揃った 2 回目は 2 連鎖で 80 点
+    expect(game.score).toBe(120)
+  })
+
+  it('同じ列でも、離れた深さで続けて消えたなら連鎖にはならない', () => {
+    // 列は重なるが 9 行離れていて、片方の消去がもう片方を引き起こしていない
+    const game = new Game(emptyWorld)
+    const grid = game.grid
+    pillar(grid, Math.floor(GRID_WIDTH / 2), 2, 30)
+
+    // 浅い方: 最初から揃っている
+    for (const x of [0, 1]) pillar(grid, x, 13, 16)
+    paint(grid, [[0, 11], [1, 11], [0, 12], [1, 12]], 0)
+
+    // 深い方: 上から 1 個落ちてきて 4 つ目になる
+    for (const x of [0, 1]) pillar(grid, x, 22, 30)
+    paint(grid, [[0, 20], [1, 20], [0, 21]], 1)
+    paint(grid, [[1, 18]], 1)
 
     for (let t = 0; t < 4000; t += 16) game.update(16, null)
 
