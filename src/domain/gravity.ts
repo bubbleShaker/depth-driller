@@ -1,14 +1,15 @@
 import { splitIntoChunks, type CellPos } from './chunks'
 import { GRID_WIDTH, type Grid } from './grid'
+import type { Cell } from './types'
 
 export interface FallResult {
   /** このティックで落ちたセルの、移動後の位置 */
   landed: CellPos[]
   /**
-   * 支えを失った塊がまだ残っているか。
-   * 落下も震えも止まって初めて盤面は静まる。連鎖が続いているかの判断に使う。
+   * 支えを失った塊がまだ動いている列。
+   * 盤面のどこかが動いているだけでは連鎖とは言えないので、列まで絞って持つ。
    */
-  unsettled: boolean
+  unsettledColumns: Set<number>
 }
 
 /**
@@ -39,31 +40,25 @@ export const FLOAT_TICKS_BEFORE_FALL = 8
  *
  */
 export function stepGravity(grid: Grid, fromY: number, toY: number): FallResult {
+  // 窓の上端。負の行は存在しないので、以降の走査もここから始める
   const top = Math.max(0, fromY)
   const key = (x: number, y: number) => y * GRID_WIDTH + x
   const { chunks, idAt } = splitIntoChunks(grid, top, toY)
 
   // 真下で接している塊。「支えられている」も「動けない」も、この関係を伝って上へ広がる
   const riders: number[][] = chunks.map(() => [])
-  const footed = chunks.map((chunk, id) => {
-    let openBottom = false
+  chunks.forEach((chunk, id) => {
     for (const { x, y } of chunk.cells) {
       const below = y + 1
-      if (below > toY) {
-        // 窓の下は未生成かもしれない。支えがあるものとして扱う
-        openBottom = true
-        continue
-      }
-      if (grid.at(x, below) === null) continue
+      if (below > toY || grid.at(x, below) === null) continue
       const belowId = idAt(x, below)
       if (belowId === undefined || belowId === id) continue
       riders[belowId]!.push(id)
     }
-    return openBottom
   })
 
   const grounded = spread(
-    chunks.map((chunk, id) => chunk.openTop || footed[id] === true),
+    chunks.map((chunk) => chunk.openTop || chunk.openBottom),
     riders,
   )
 
@@ -95,10 +90,13 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): FallResult 
     riders,
   )
 
-  return {
-    landed: applyFall(grid, chunks, held, top, toY, key),
-    unsettled: grounded.includes(false),
-  }
+  const unsettledColumns = new Set<number>()
+  chunks.forEach((chunk, id) => {
+    if (grounded[id] === true) return
+    for (const pos of chunk.cells) unsettledColumns.add(pos.x)
+  })
+
+  return { landed: applyFall(grid, chunks, held, top, toY, key), unsettledColumns }
 }
 
 function isClearing(grid: Grid, cells: CellPos[]): boolean {
@@ -130,23 +128,24 @@ function applyFall(
   key: (x: number, y: number) => number,
 ): CellPos[] {
   // 一度すべて消してから書き戻す。1 つずつ動かすと、同じ塊の上のセルが下のセルを踏み潰す
-  const falling: { pos: CellPos; color: number; floatTicks: number }[] = []
+  const falling: { pos: CellPos; cell: NonNullable<Cell> }[] = []
   chunks.forEach((chunk, id) => {
     if (held[id] === true) return
     for (const pos of chunk.cells) {
       const cell = grid.at(pos.x, pos.y)
-      if (cell !== null) falling.push({ pos, color: cell.color, floatTicks: cell.floatTicks })
+      if (cell !== null) falling.push({ pos, cell })
     }
   })
   for (const { pos } of falling) grid.set(pos.x, pos.y, null)
 
   const landed: CellPos[] = []
-  for (const { pos, color, floatTicks } of falling) {
+  for (const { pos, cell } of falling) {
     // 落ちる先が空いていないなら判定のどこかが破綻している。
     // ブロックを消してしまうより、その場に戻す方がまだ被害が小さい
     const blocked = grid.at(pos.x, pos.y + 1) !== null
     const to = blocked ? pos : { x: pos.x, y: pos.y + 1 }
-    grid.set(to.x, to.y, { color, fell: !blocked, floatTicks, clearTicks: 0 })
+    // セルを作り直さず運ぶ。状態が増えた時に書き潰さないため
+    grid.set(to.x, to.y, { ...cell, fell: !blocked })
     if (!blocked) landed.push(to)
   }
 

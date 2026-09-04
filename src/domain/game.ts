@@ -1,7 +1,7 @@
 import type { CellPos } from './chunks'
-import { stepClear } from './clear'
+import { stepClear, type ClearOrder } from './clear'
 import { stepGravity } from './gravity'
-import { GRID_WIDTH, Grid, SURFACE_ROWS } from './grid'
+import { GRID_WIDTH, Grid, SURFACE_ROWS, type RowGenerator } from './grid'
 import { decideAction } from './player'
 import { createTerrain } from './terrain'
 import type { Direction } from './types'
@@ -63,9 +63,14 @@ export class Game {
   #actionDuration = 0
   #fallElapsed = 0
   #digTarget: CellPos | null = null
+  /** 消えると決まった塊。窓がずれても最後まで一緒に消えるよう、盤面の外で持つ */
+  readonly #clearOrders: ClearOrder[] = []
+  /** 直前に消した跡の列。ここが動いている間だけ連鎖が続く */
+  #chainColumns = new Set<number>()
 
-  constructor(random?: () => number, clusterChance?: number) {
-    this.grid = new Grid(createTerrain(random, clusterChance))
+  /** 土の作り方を差し替えられる。テストでは手で書いた盤面を渡せる */
+  constructor(rows: RowGenerator = createTerrain()) {
+    this.grid = new Grid(rows)
     this.x = Math.floor(GRID_WIDTH / 2)
     this.y = SURFACE_ROWS - 1
     this.#prevX = this.x
@@ -152,16 +157,25 @@ export class Game {
     // 落ちてきたブロックが自分のいるマスに入った = 潰された
     if (fall.landed.some((p) => p.x === this.x && p.y === this.y)) {
       this.state = 'gameover'
+      this.chain = 0
       return true
     }
 
-    const cleared = stepClear(this.grid, top, bottom)
+    const cleared = stepClear(this.grid, this.#clearOrders, top, bottom)
     if (cleared.removed > 0) {
       this.chain += 1
       this.score += scoreFor(cleared.removed, this.chain)
-    } else if (!fall.unsettled && cleared.pending === 0) {
-      // 落ちるものも消えるものも無くなった。ここで連鎖は途切れる
-      this.chain = 0
+      this.#chainColumns = new Set(cleared.removedColumns)
+      return false
+    }
+    if (this.chain > 0) {
+      // 消した跡へ向かう落下が止まったら、そこで連鎖は途切れる。
+      // 盤面のどこかが動いているだけでは、無関係な消去まで連鎖に数えてしまう
+      const stillFalling = [...this.#chainColumns].some((x) => fall.unsettledColumns.has(x))
+      if (!stillFalling && cleared.pending === 0) {
+        this.chain = 0
+        this.#chainColumns.clear()
+      }
     }
     return false
   }

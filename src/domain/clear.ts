@@ -1,5 +1,5 @@
-import { splitIntoChunks } from './chunks'
-import { GRID_WIDTH, type Grid } from './grid'
+import { splitIntoChunks, type CellPos } from './chunks'
+import type { Grid } from './grid'
 
 /** 何個つながったら消えるか */
 export const CLEAR_MIN_SIZE = 4
@@ -10,9 +10,24 @@ export const CLEAR_MIN_SIZE = 4
  */
 export const CLEAR_DELAY_TICKS = 6
 
+/**
+ * 消えると決まった塊。
+ *
+ * セル側のカウンタだけで管理すると、点滅している間にプレイヤーが動いて
+ * 窓（計算する範囲）がずれたとき、塊の半分だけが消えて残りが宙に固まる。
+ * 「一度印がついた塊は、窓がどこにあろうと最後まで一緒に消える」ことを
+ * 保証するために、塊ごとの予約として外に持つ。
+ */
+export interface ClearOrder {
+  cells: CellPos[]
+  ticksLeft: number
+}
+
 export interface ClearResult {
   /** このティックで盤面から取り除いたセルの数 */
   removed: number
+  /** 取り除いたセルがあった列。連鎖が続いているかの判断に使う */
+  removedColumns: number[]
   /** 消える印がついたばかりのセルの数 */
   marked: number
   /** 消えるのを待っているセルの数。0 なら盤面に消し掛けのものは無い */
@@ -27,46 +42,62 @@ export interface ClearResult {
  * 消えた跡は支えを失うので、次のティックで [[stepGravity]] が塊を落とし、
  * そこでまた 4 つ揃えば連鎖する。
  *
- * 落ちている最中の塊は数に入れない。空中で揃ったものが消えると、
+ * 浮いている塊は数に入れない。空中で揃ったものが消えると、
  * 着地を見て置き場所を考える遊びが成り立たなくなる。
+ * 浮いているかは [[stepGravity]] が書いた `floatTicks` で分かるので、
+ * 先に重力を進めてから呼ぶこと。
+ *
+ * @param orders 進行中の予約。呼び出し側が持ち続け、この関数が書き換える
  */
-export function stepClear(grid: Grid, fromY: number, toY: number): ClearResult {
-  const top = Math.max(0, fromY)
+export function stepClear(
+  grid: Grid,
+  orders: ClearOrder[],
+  fromY: number,
+  toY: number,
+): ClearResult {
   let removed = 0
-  let marked = 0
-  let pending = 0
+  const removedColumns = new Set<number>()
 
-  // 先に点滅を進める。同じティックで印を付けて即消すと点滅が 1 回も見えない
-  for (let y = top; y <= toY; y++) {
-    for (let x = 0; x < GRID_WIDTH; x++) {
-      const cell = grid.at(x, y)
-      if (cell === null || cell.clearTicks <= 0) continue
-      cell.clearTicks -= 1
-      if (cell.clearTicks <= 0) {
-        grid.set(x, y, null)
-        removed += 1
-      } else {
-        pending += 1
+  // 先に点滅を進める。同じティックで印を付けて即消すと点滅が 1 回も見えない。
+  // 窓の外に出た予約もここで進むので、印がついた塊は必ず消えきる
+  for (let i = orders.length - 1; i >= 0; i--) {
+    const order = orders[i]!
+    order.ticksLeft -= 1
+
+    if (order.ticksLeft > 0) {
+      for (const pos of order.cells) {
+        const cell = grid.at(pos.x, pos.y)
+        if (cell !== null) cell.clearTicks = order.ticksLeft
       }
+      continue
     }
+
+    for (const pos of order.cells) {
+      if (grid.at(pos.x, pos.y) === null) continue
+      grid.set(pos.x, pos.y, null)
+      removed += 1
+      removedColumns.add(pos.x)
+    }
+    orders.splice(i, 1)
   }
 
-  const { chunks } = splitIntoChunks(grid, top, toY)
-  for (const chunk of chunks) {
+  let marked = 0
+  for (const chunk of splitIntoChunks(grid, fromY, toY).chunks) {
     if (chunk.cells.length < CLEAR_MIN_SIZE) continue
-    // 窓の外へ続く塊は全体の大きさが分からない。落下と同じく手を出さない
-    if (chunk.openTop) continue
-    if (chunk.cells.some((pos) => grid.at(pos.x, pos.y)?.fell === true)) continue
+    // 窓からはみ出した塊は全体の大きさが分からない。落下と同じく手を出さない
+    if (chunk.openTop || chunk.openBottom) continue
+    if (chunk.cells.some((pos) => (grid.at(pos.x, pos.y)?.floatTicks ?? 0) > 0)) continue
     if (chunk.cells.some((pos) => (grid.at(pos.x, pos.y)?.clearTicks ?? 0) > 0)) continue
 
+    orders.push({ cells: chunk.cells, ticksLeft: CLEAR_DELAY_TICKS })
     for (const pos of chunk.cells) {
       const cell = grid.at(pos.x, pos.y)
       if (cell === null) continue
       cell.clearTicks = CLEAR_DELAY_TICKS
       marked += 1
-      pending += 1
     }
   }
 
-  return { removed, marked, pending }
+  const pending = orders.reduce((total, order) => total + order.cells.length, 0)
+  return { removed, removedColumns: [...removedColumns], marked, pending }
 }

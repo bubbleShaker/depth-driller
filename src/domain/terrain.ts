@@ -74,7 +74,8 @@ function groupSizeWith(
   color: number,
   peek: (x: number, y: number) => Cell,
 ): number {
-  const seen = new Set<string>([`${x},${y}`])
+  const key = (px: number, py: number) => py * GRID_WIDTH + px
+  const seen = new Set<number>([key(x, y)])
   const stack = [{ x, y }]
   let size = 0
 
@@ -90,7 +91,7 @@ function groupSizeWith(
       [pos.x, pos.y - 1],
     ] as const) {
       if (nx < 0 || nx >= GRID_WIDTH || ny < 0) continue
-      const id = `${nx},${ny}`
+      const id = key(nx, ny)
       if (seen.has(id)) continue
       const neighbor = peek(nx, ny)
       if (neighbor === null || neighbor.color !== color) continue

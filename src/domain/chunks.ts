@@ -7,9 +7,10 @@ export interface CellPos {
 
 export interface Chunk {
   cells: CellPos[]
-  color: number
   /** 窓の上へ続いている。全体が見えていないので、動かすことも消すこともできない */
   openTop: boolean
+  /** 窓の下へ足が出ている。その先は未生成かもしれないので、同じく手を出せない */
+  openBottom: boolean
 }
 
 export interface ChunkMap {
@@ -24,15 +25,16 @@ export interface ChunkMap {
  * 落下も消去も「塊」を単位にするので、両方がこの結果を使う。
  * 落ちるのは支えを失った塊ごと、消えるのは 4 つ以上つながった塊ごと。
  *
- * 窓の外は見えないので、上へ続いている塊には印を付けて呼び出し側に判断を委ねる。
+ * 窓の外は見えないので、はみ出している塊には印を付けて呼び出し側に判断を委ねる。
  * 半分だけ落としたり半分だけ消したりすると盤面に穴が空く。
  */
 export function splitIntoChunks(grid: Grid, fromY: number, toY: number): ChunkMap {
+  const top = Math.max(0, fromY)
   const key = (x: number, y: number) => y * GRID_WIDTH + x
   const chunkOf = new Map<number, number>()
   const chunks: Chunk[] = []
 
-  for (let y = fromY; y <= toY; y++) {
+  for (let y = top; y <= toY; y++) {
     for (let x = 0; x < GRID_WIDTH; x++) {
       const cell = grid.at(x, y)
       if (cell === null || chunkOf.has(key(x, y))) continue
@@ -41,6 +43,7 @@ export function splitIntoChunks(grid: Grid, fromY: number, toY: number): ChunkMa
       const cells: CellPos[] = []
       const stack: CellPos[] = [{ x, y }]
       let openTop = false
+      let openBottom = false
       chunkOf.set(key(x, y), id)
       while (stack.length > 0) {
         const pos = stack.pop()!
@@ -51,8 +54,13 @@ export function splitIntoChunks(grid: Grid, fromY: number, toY: number): ChunkMa
           [pos.x, pos.y + 1],
           [pos.x, pos.y - 1],
         ] as const) {
-          if (nx < 0 || nx >= GRID_WIDTH || ny > toY) continue
-          if (ny < fromY) {
+          if (nx < 0 || nx >= GRID_WIDTH) continue
+          if (ny > toY) {
+            // 窓の下は未生成かもしれない。足が出ているだけで支えとみなす
+            openBottom = true
+            continue
+          }
+          if (ny < top) {
             // 窓の外までつながっているかだけ見て、探索は広げない
             const above = grid.at(nx, ny)
             if (above !== null && above.color === cell.color) openTop = true
@@ -65,7 +73,7 @@ export function splitIntoChunks(grid: Grid, fromY: number, toY: number): ChunkMa
           stack.push({ x: nx, y: ny })
         }
       }
-      chunks.push({ cells, color: cell.color, openTop })
+      chunks.push({ cells, openTop, openBottom })
     }
   }
 

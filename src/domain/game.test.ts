@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { DIG_DURATION_MS, FALL_INTERVAL_MS, Game } from './game'
 import { FLOAT_TICKS_BEFORE_FALL } from './gravity'
-import { seededRandom } from './testing'
+import { GRID_WIDTH, type Grid } from './grid'
+import { block, emptyWorld, seededRandom } from './testing'
+import { createTerrain } from './terrain'
+
+/** 隣どうしが同じ色にならない柱。支えにはなるが、それ自体は消えない */
+function pillar(grid: Grid, x: number, fromY: number, toY: number): void {
+  for (let y = fromY; y <= toY; y++) grid.set(x, y, block(y % 4))
+}
+
+function paint(grid: Grid, cells: [number, number][], color: number): void {
+  for (const [x, y] of cells) grid.set(x, y, block(color))
+}
 
 /** 色を 1 種類に固定した盤面。落下や消去の条件を意図した形だけに絞れる */
-const solidGround = () => new Game(() => 0)
+const solidGround = () => new Game(createTerrain(() => 0))
 
 describe('Game', () => {
   it('地表に立って始まる', () => {
@@ -107,7 +118,7 @@ describe('Game', () => {
 
   it('下を押し続けている限りは潜り続けられる', () => {
     // 掘って落ちるだけで潰されるようなら、そもそもゲームにならない
-    const game = new Game(seededRandom(1))
+    const game = new Game(createTerrain(seededRandom(1)))
     for (let t = 0; t < 20000 && game.state === 'playing'; t += 16) {
       game.update(16, 'down')
     }
@@ -117,7 +128,7 @@ describe('Game', () => {
 
   it('頭上の震えを見て逃げれば、横に掘り進んでも生き延びられる', () => {
     // 震えはブロックが落ちてくる唯一の予告。これに反応して助からないなら理不尽なゲームになる
-    const game = new Game(seededRandom(3))
+    const game = new Game(createTerrain(seededRandom(3)))
     for (let t = 0; t < 20000 && game.state === 'playing'; t += 16) {
       const above = game.grid.at(game.x, game.y - 1)
       const escaping = above !== null && above.floatTicks > 0
@@ -126,16 +137,22 @@ describe('Game', () => {
     expect(game.state).toBe('playing')
   })
 
-  it('掘り進めばブロックが揃って消え、点が入る', () => {
-    // 消えないなら地形の色の配り方（terrain）が壊れている。実測で 30 シード中 15 は点が入る
-    const game = new Game(seededRandom(1))
-    for (let t = 0; t < 30000 && game.state === 'playing'; t += 16) {
-      const above = game.grid.at(game.x, game.y - 1)
-      const escaping = above !== null && above.floatTicks > 0
-      const phase = Math.floor(t / 1200) % 4
-      game.update(16, escaping ? 'down' : phase === 3 ? 'right' : 'down')
-    }
-    expect(game.score).toBeGreaterThan(0)
+  it('離れた場所で続けて消えても連鎖にはならない', () => {
+    const game = new Game(emptyWorld)
+    const grid = game.grid
+    pillar(grid, Math.floor(GRID_WIDTH / 2), 2, 30) // プレイヤーの足場
+    for (const x of [0, 1, 6]) pillar(grid, x, 22, 30) // 消える塊の土台
+
+    // 左: 最初から 4 つ揃っている
+    paint(grid, [[0, 20], [1, 20], [0, 21], [1, 21]], 0)
+    // 右: 3 つ + 上から落ちてきて 4 つ目になる。左とは無関係に、少し遅れて消える
+    paint(grid, [[6, 19], [6, 20], [6, 21]], 1)
+    paint(grid, [[6, 17]], 1)
+
+    for (let t = 0; t < 4000; t += 16) game.update(16, null)
+
+    // 4 個 × 2 回。連鎖と数えていれば 40 + 80 になる
+    expect(game.score).toBe(80)
   })
 
   it('潜った後に浅い場所へ戻っても最大深度は減らない', () => {

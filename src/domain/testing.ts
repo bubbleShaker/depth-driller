@@ -1,5 +1,12 @@
-import { GRID_WIDTH, Grid } from './grid'
+import { GRID_WIDTH, Grid, type RowGenerator } from './grid'
 import type { Cell } from './types'
+
+/** 土がまったく無い世界。テストで必要な形だけを置きたいときに渡す */
+export const emptyWorld: RowGenerator = () => Array.from<Cell>({ length: GRID_WIDTH }).fill(null)
+
+export function block(color: number): Cell {
+  return { color, fell: false, floatTicks: 0, clearTicks: 0 }
+}
 
 /**
  * 文字で盤面を書き下す。'.' が空、数字がその色のブロック。
@@ -13,7 +20,7 @@ export function makeGrid(rows: string[]): Grid {
       throw new Error(`行 ${y} の幅が ${row.length}。${GRID_WIDTH} で書くこと`)
     }
     ;[...row].forEach((ch, x) => {
-      const cell: Cell = ch === '.' ? null : { color: Number(ch), fell: false, floatTicks: 0, clearTicks: 0 }
+      const cell: Cell = ch === '.' ? null : block(Number(ch))
       grid.set(x, y, cell)
     })
   })
