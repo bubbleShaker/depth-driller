@@ -1,8 +1,15 @@
+import { splitIntoChunks, type CellPos } from './chunks'
 import { GRID_WIDTH, type Grid } from './grid'
+import type { Block } from './types'
 
-export interface CellPos {
-  x: number
-  y: number
+export interface FallResult {
+  /** このティックで落ちたセルの、移動後の位置 */
+  landed: CellPos[]
+  /**
+   * 支えを失った塊がある列。落下の猶予中でまだ動いていないものも含む。
+   * 盤面のどこかが動いているだけでは連鎖とは言えないので、列まで絞って持つ。
+   */
+  unsupportedColumns: ReadonlySet<number>
 }
 
 /**
@@ -12,18 +19,10 @@ export interface CellPos {
  */
 export const FLOAT_TICKS_BEFORE_FALL = 8
 
-interface Chunk {
-  cells: CellPos[]
-  /** 窓の上へ続いている。全体が見えないので動かせない */
-  openTop: boolean
-  /** 窓の下へ足が出ている。その先は未生成かもしれないので、支えがあるものとして扱う */
-  openBottom: boolean
-}
-
 /**
  * 支えを失った塊を 1 マスだけ落とす。
  *
- * 落ちる単位は「同じ色で上下左右につながったひとかたまり」。
+ * 落ちる単位は同じ色でつながったひとかたまり（[[splitIntoChunks]]）。
  * 色が違うブロックは互いを支えるが、一緒には落ちない。原作でブロックを 1 つ掘ると
  * 同色の塊がまとめて降ってくるのはこのため。
  *
@@ -39,25 +38,20 @@ interface Chunk {
  * 窓からはみ出した塊は動かさない。空だと決めつけると盤面が丸ごと落ちてしまうし、
  * 塊を窓で切って落とすと半分だけが落ちて穴が空く。
  *
- * @returns 落ちたセルの移動後の位置
  */
-export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
+export function stepGravity(grid: Grid, fromY: number, toY: number): FallResult {
+  // 窓の上端。負の行は存在しないので、以降の走査もここから始める
   const top = Math.max(0, fromY)
   const key = (x: number, y: number) => y * GRID_WIDTH + x
-
-  const { chunks, chunkOf } = splitIntoChunks(grid, top, toY, key)
+  const { chunks, idAt } = splitIntoChunks(grid, top, toY)
 
   // 真下で接している塊。「支えられている」も「動けない」も、この関係を伝って上へ広がる
   const riders: number[][] = chunks.map(() => [])
   chunks.forEach((chunk, id) => {
     for (const { x, y } of chunk.cells) {
       const below = y + 1
-      if (below > toY) {
-        chunk.openBottom = true
-        continue
-      }
-      if (grid.at(x, below) === null) continue
-      const belowId = chunkOf.get(key(x, below))
+      if (below > toY || grid.at(x, below) === null) continue
+      const belowId = idAt(x, below)
       if (belowId === undefined || belowId === id) continue
       riders[belowId]!.push(id)
     }
@@ -84,62 +78,30 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
     }
   })
 
-  // このティックで動けない塊。猶予の最中のものと、その上に乗っているものも動けない
+  // このティックで動けない塊。猶予の最中のものと、その上に乗っているものも動けない。
+  // 消えるのを待っているブロックも、消えるまではその場に留まる
   const held = spread(
-    chunks.map((_, id) => grounded[id] === true || floatTicks[id]! <= FLOAT_TICKS_BEFORE_FALL),
+    chunks.map(
+      (chunk, id) =>
+        grounded[id] === true ||
+        floatTicks[id]! <= FLOAT_TICKS_BEFORE_FALL ||
+        isClearing(grid, chunk.cells),
+    ),
     riders,
   )
 
-  return applyFall(grid, chunks, held, top, toY, key)
+  const unsupportedColumns = new Set<number>()
+  chunks.forEach((chunk, id) => {
+    if (grounded[id] === true) return
+    for (const pos of chunk.cells) unsupportedColumns.add(pos.x)
+  })
+
+  return { landed: applyFall(grid, chunks, held, top, toY, key), unsupportedColumns }
 }
 
-/** 同じ色でつながったセルをひとかたまりにまとめる */
-function splitIntoChunks(
-  grid: Grid,
-  top: number,
-  toY: number,
-  key: (x: number, y: number) => number,
-): { chunks: Chunk[]; chunkOf: Map<number, number> } {
-  const chunkOf = new Map<number, number>()
-  const chunks: Chunk[] = []
-
-  for (let y = top; y <= toY; y++) {
-    for (let x = 0; x < GRID_WIDTH; x++) {
-      const cell = grid.at(x, y)
-      if (cell === null || chunkOf.has(key(x, y))) continue
-
-      const id = chunks.length
-      const cells: CellPos[] = []
-      const stack: CellPos[] = [{ x, y }]
-      let openTop = false
-      chunkOf.set(key(x, y), id)
-      while (stack.length > 0) {
-        const pos = stack.pop()!
-        cells.push(pos)
-        for (const [nx, ny] of [
-          [pos.x + 1, pos.y],
-          [pos.x - 1, pos.y],
-          [pos.x, pos.y + 1],
-          [pos.x, pos.y - 1],
-        ] as const) {
-          if (nx < 0 || nx >= GRID_WIDTH || ny > toY) continue
-          if (ny < top) {
-            // 窓の外までつながっているかだけ見て、探索は広げない
-            const above = grid.at(nx, ny)
-            if (above !== null && above.color === cell.color) openTop = true
-            continue
-          }
-          if (chunkOf.has(key(nx, ny))) continue
-          const neighbor = grid.at(nx, ny)
-          if (neighbor === null || neighbor.color !== cell.color) continue
-          chunkOf.set(key(nx, ny), id)
-          stack.push({ x: nx, y: ny })
-        }
-      }
-      chunks.push({ cells, openTop, openBottom: false })
-    }
-  }
-  return { chunks, chunkOf }
+/** 消えるのを待っているか。真実は ClearScheduler が持ち、ここで読むのはセル側の写し */
+function isClearing(grid: Grid, cells: CellPos[]): boolean {
+  return cells.some((pos) => (grid.at(pos.x, pos.y)?.clearTicks ?? 0) > 0)
 }
 
 /** 種になった塊から、その上に乗っている塊へ状態を配る */
@@ -160,30 +122,33 @@ function spread(seeds: boolean[], riders: number[][]): boolean[] {
 /** 動ける塊を 1 マス下へ移す */
 function applyFall(
   grid: Grid,
-  chunks: Chunk[],
+  chunks: { cells: CellPos[] }[],
   held: boolean[],
   top: number,
   toY: number,
   key: (x: number, y: number) => number,
 ): CellPos[] {
   // 一度すべて消してから書き戻す。1 つずつ動かすと、同じ塊の上のセルが下のセルを踏み潰す
-  const falling: { pos: CellPos; color: number; floatTicks: number }[] = []
+  const falling: { pos: CellPos; cell: Block }[] = []
   chunks.forEach((chunk, id) => {
     if (held[id] === true) return
     for (const pos of chunk.cells) {
       const cell = grid.at(pos.x, pos.y)
-      if (cell !== null) falling.push({ pos, color: cell.color, floatTicks: cell.floatTicks })
+      if (cell !== null) falling.push({ pos, cell })
     }
   })
   for (const { pos } of falling) grid.set(pos.x, pos.y, null)
 
   const landed: CellPos[] = []
-  for (const { pos, color, floatTicks } of falling) {
+  for (const { pos, cell } of falling) {
     // 落ちる先が空いていないなら判定のどこかが破綻している。
     // ブロックを消してしまうより、その場に戻す方がまだ被害が小さい
     const blocked = grid.at(pos.x, pos.y + 1) !== null
     const to = blocked ? pos : { x: pos.x, y: pos.y + 1 }
-    grid.set(to.x, to.y, { color, fell: !blocked, floatTicks })
+    // 同じオブジェクトのまま運ぶ。作り直すと状態を書き潰すうえ、
+    // 消える予約が「そこにあったセル」を見失う
+    cell.fell = !blocked
+    grid.set(to.x, to.y, cell)
     if (!blocked) landed.push(to)
   }
 

@@ -1,4 +1,4 @@
-import { COLOR_COUNT, type Cell } from './types'
+import type { Cell } from './types'
 
 /** 掘れる範囲の横幅。原作と同じく狭く、左右は壁で閉じている */
 export const GRID_WIDTH = 8
@@ -7,17 +7,28 @@ export const GRID_WIDTH = 8
 export const SURFACE_ROWS = 2
 
 /**
- * 縦に無限へ続く土。
+ * 1 行ぶんの土を作る。
+ * `look` で既に出来ている盤面を読めるので、上の行を見て色を選べる。
+ */
+export type RowGenerator = (y: number, look: (x: number, y: number) => Cell) => Cell[]
+
+/** 土がまったく無い世界。テストで必要な形だけを置きたいときに渡す */
+export const emptyWorld: RowGenerator = () => Array.from<Cell>({ length: GRID_WIDTH }).fill(null)
+
+/**
+ * 縦に無限へ続く土の**入れ物**。
  * 「下がまだ無い」のではなく「まだ作っていないだけ」なので、
  * 潜った深さに応じて ensureDepth で掘り足していく。
+ *
+ * どんな土を作るかは知らない。色の配り方は深さやルール（4 つ揃うと消える等）に
+ * 左右されるので、行の作り方は外から渡す。
  */
 export class Grid {
   readonly #rows: Cell[][] = []
-  readonly #random: () => number
+  readonly #generate: RowGenerator
 
-  /** 乱数を差し替えられるようにしておくと、盤面を固定してテストできる */
-  constructor(random: () => number = Math.random) {
-    this.#random = random
+  constructor(generate: RowGenerator = emptyWorld) {
+    this.#generate = generate
   }
 
   /** 生成済みの最下行。これより下は未生成で、まだ「無い」わけではない */
@@ -27,7 +38,7 @@ export class Grid {
 
   ensureDepth(depth: number): void {
     while (this.#rows.length <= depth) {
-      this.#rows.push(this.#createRow(this.#rows.length))
+      this.#rows.push(this.#generate(this.#rows.length, (x, y) => this.at(x, y)))
     }
   }
 
@@ -51,14 +62,5 @@ export class Grid {
   /** そこへ進めないか。壁でもブロックでもない場所だけ歩ける */
   isBlocked(x: number, y: number): boolean {
     return this.isWall(x) || this.at(x, y) !== null
-  }
-
-  #createRow(y: number): Cell[] {
-    if (y < SURFACE_ROWS) return Array.from<Cell>({ length: GRID_WIDTH }).fill(null)
-    return Array.from({ length: GRID_WIDTH }, () => ({
-      color: Math.floor(this.#random() * COLOR_COUNT),
-      fell: false,
-      floatTicks: 0,
-    }))
   }
 }

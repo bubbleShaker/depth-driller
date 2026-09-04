@@ -93,7 +93,10 @@ export class Renderer {
         // 落下が近いほど揺れを大きくして「そろそろ来る」を伝える
         const urgency = block.fell ? 0 : Math.min(1, block.floatTicks / FLOAT_TICKS_BEFORE_FALL)
         const wobble = urgency * Math.sin(performance.now() / 26 + y) * cell * 0.07
-        this.#drawBlock(this.#originX + x * cell + wobble, toPx(drawRow), block.color)
+        // 消える印がついたブロックは点滅する。時間ではなくティックで数えるので、
+        // フレームレートが落ちても点滅の回数は変わらない
+        const flash = block.clearTicks > 0 ? (block.clearTicks % 2 === 0 ? 0.75 : 0.2) : 0
+        this.#drawBlock(this.#originX + x * cell + wobble, toPx(drawRow), block.color, flash)
       }
     }
 
@@ -152,7 +155,7 @@ export class Renderer {
     ctx.fillRect(right, fromY, edge, height)
   }
 
-  #drawBlock(px: number, py: number, color: number): void {
+  #drawBlock(px: number, py: number, color: number, flash = 0): void {
     const ctx = this.#ctx
     const cell = this.#cell
     const palette = BLOCK_COLORS[color % BLOCK_COLORS.length]!
@@ -173,6 +176,13 @@ export class Renderer {
     ctx.beginPath()
     ctx.roundRect(px + cell * 0.16, py + cell * 0.14, size * 0.42, size * 0.2, cell * 0.08)
     ctx.fill()
+
+    if (flash > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${flash})`
+      ctx.beginPath()
+      ctx.roundRect(px + inset, py + inset, size, size, cell * 0.18)
+      ctx.fill()
+    }
   }
 
   #drawPlayer(game: BoardView, toPx: (row: number) => number): void {

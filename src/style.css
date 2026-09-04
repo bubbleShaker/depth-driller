@@ -53,18 +53,42 @@ body {
   top: max(0.6rem, env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  gap: 0.9rem;
   padding: 0.25rem 0.9rem;
   border-radius: 999px;
   background: rgba(10, 12, 18, 0.78);
-  font-size: 1rem;
+  font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   pointer-events: none;
 }
 
-#hud #depth {
-  font-size: 1.5rem;
+.hud-item b {
+  font-size: 1.4rem;
   font-weight: 700;
+}
+
+/* 連鎖は一瞬しか出ないので、画面の真ん中で大きく主張させる */
+#chain {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #ffd23f;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+#chain[hidden] {
+  display: none;
+}
+
+#chain b {
+  font-size: 2.4rem;
 }
 
 #overlay {
@@ -93,6 +117,18 @@ body {
   margin: 0 0 1rem;
   font-size: 1rem;
   opacity: 0.85;
+}
+
+.overlay-score {
+  margin: -0.6rem 0 1rem;
+  font-size: 0.95rem;
+  opacity: 0.75;
+}
+
+.overlay-score span {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .overlay-depth span {

@@ -12,10 +12,15 @@
     <div id="app">
       <div id="stage">
         <canvas id="board"></canvas>
-        <div id="hud"><span id="depth">0</span> m</div>
+        <div id="hud">
+          <span class="hud-item"><b id="depth">0</b> m</span>
+          <span class="hud-item"><b id="score">0</b> pts</span>
+        </div>
+        <div id="chain" hidden><b id="chain-count">2</b> CHAIN</div>
         <div id="overlay" hidden>
           <p class="overlay-title">つぶされた</p>
           <p class="overlay-depth"><span id="final-depth">0</span> m</p>
+          <p class="overlay-score"><span id="final-score">0</span> pts</p>
           <button id="retry" type="button">もう一度</button>
         </div>
       </div>
