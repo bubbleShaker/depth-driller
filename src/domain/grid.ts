@@ -12,7 +12,8 @@ export const SURFACE_ROWS = 2
  */
 export type RowGenerator = (y: number, look: (x: number, y: number) => Cell) => Cell[]
 
-const emptyRow: RowGenerator = () => Array.from<Cell>({ length: GRID_WIDTH }).fill(null)
+/** 土がまったく無い世界。テストで必要な形だけを置きたいときに渡す */
+export const emptyWorld: RowGenerator = () => Array.from<Cell>({ length: GRID_WIDTH }).fill(null)
 
 /**
  * 縦に無限へ続く土の**入れ物**。
@@ -26,7 +27,7 @@ export class Grid {
   readonly #rows: Cell[][] = []
   readonly #generate: RowGenerator
 
-  constructor(generate: RowGenerator = emptyRow) {
+  constructor(generate: RowGenerator = emptyWorld) {
     this.#generate = generate
   }
 

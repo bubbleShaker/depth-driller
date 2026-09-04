@@ -1,8 +1,5 @@
-import { GRID_WIDTH, Grid, type RowGenerator } from './grid'
+import { GRID_WIDTH, Grid } from './grid'
 import type { Cell } from './types'
-
-/** 土がまったく無い世界。テストで必要な形だけを置きたいときに渡す */
-export const emptyWorld: RowGenerator = () => Array.from<Cell>({ length: GRID_WIDTH }).fill(null)
 
 export function block(color: number): Cell {
   return { color, fell: false, floatTicks: 0, clearTicks: 0 }

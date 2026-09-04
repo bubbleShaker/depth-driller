@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { DIG_DURATION_MS, FALL_INTERVAL_MS, Game } from './game'
 import { FLOAT_TICKS_BEFORE_FALL } from './gravity'
-import { GRID_WIDTH, type Grid } from './grid'
-import { block, emptyWorld, seededRandom } from './testing'
+import { GRID_WIDTH, emptyWorld, type Grid } from './grid'
+import { block, seededRandom } from './testing'
 import { createTerrain } from './terrain'
 
 /** 隣どうしが同じ色にならない柱。支えにはなるが、それ自体は消えない */
@@ -152,6 +152,24 @@ describe('Game', () => {
     for (let t = 0; t < 4000; t += 16) game.update(16, null)
 
     // 4 個 × 2 回。連鎖と数えていれば 40 + 80 になる
+    expect(game.score).toBe(80)
+  })
+
+  it('離れた場所の消去が近い時間で続いても連鎖にはならない', () => {
+    // 上のテストとの違いは、右の塊がもう落下中で、着地が 8 ティック早いこと。
+    // 「続けて消えた」だけで連鎖を伸ばすと、この近さで巻き込まれる
+    const game = new Game(emptyWorld)
+    const grid = game.grid
+    pillar(grid, Math.floor(GRID_WIDTH / 2), 2, 30)
+    for (const x of [0, 1, 6]) pillar(grid, x, 22, 30)
+
+    paint(grid, [[0, 20], [1, 20], [0, 21], [1, 21]], 0)
+    paint(grid, [[6, 19], [6, 20], [6, 21]], 1)
+    paint(grid, [[6, 17]], 1)
+    grid.at(6, 17)!.floatTicks = FLOAT_TICKS_BEFORE_FALL
+
+    for (let t = 0; t < 4000; t += 16) game.update(16, null)
+
     expect(game.score).toBe(80)
   })
 

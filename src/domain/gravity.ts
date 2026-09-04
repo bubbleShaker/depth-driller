@@ -6,10 +6,10 @@ export interface FallResult {
   /** このティックで落ちたセルの、移動後の位置 */
   landed: CellPos[]
   /**
-   * 支えを失った塊がまだ動いている列。
+   * 支えを失った塊がある列。落下の猶予中でまだ動いていないものも含む。
    * 盤面のどこかが動いているだけでは連鎖とは言えないので、列まで絞って持つ。
    */
-  unsettledColumns: Set<number>
+  unsupportedColumns: ReadonlySet<number>
 }
 
 /**
@@ -90,15 +90,16 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): FallResult 
     riders,
   )
 
-  const unsettledColumns = new Set<number>()
+  const unsupportedColumns = new Set<number>()
   chunks.forEach((chunk, id) => {
     if (grounded[id] === true) return
-    for (const pos of chunk.cells) unsettledColumns.add(pos.x)
+    for (const pos of chunk.cells) unsupportedColumns.add(pos.x)
   })
 
-  return { landed: applyFall(grid, chunks, held, top, toY, key), unsettledColumns }
+  return { landed: applyFall(grid, chunks, held, top, toY, key), unsupportedColumns }
 }
 
+/** 消えるのを待っているか。真実は ClearScheduler が持ち、ここで読むのはセル側の写し */
 function isClearing(grid: Grid, cells: CellPos[]): boolean {
   return cells.some((pos) => (grid.at(pos.x, pos.y)?.clearTicks ?? 0) > 0)
 }

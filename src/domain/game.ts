@@ -1,5 +1,5 @@
 import type { CellPos } from './chunks'
-import { stepClear, type ClearOrder } from './clear'
+import { ClearScheduler } from './clear'
 import { stepGravity } from './gravity'
 import { GRID_WIDTH, Grid, SURFACE_ROWS, type RowGenerator } from './grid'
 import { decideAction } from './player'
@@ -64,7 +64,7 @@ export class Game {
   #fallElapsed = 0
   #digTarget: CellPos | null = null
   /** 消えると決まった塊。窓がずれても最後まで一緒に消えるよう、盤面の外で持つ */
-  readonly #clearOrders: ClearOrder[] = []
+  readonly #clears = new ClearScheduler()
   /** 直前に消した跡の列。ここが動いている間だけ連鎖が続く */
   #chainColumns = new Set<number>()
 
@@ -161,18 +161,20 @@ export class Game {
       return true
     }
 
-    const cleared = stepClear(this.grid, this.#clearOrders, top, bottom)
+    const cleared = this.#clears.step(this.grid, top, bottom)
     if (cleared.removed > 0) {
-      this.chain += 1
+      // 前に消した跡と同じ列で起きた消去だけを連鎖と数える。
+      // 「続けて消えた」だけで伸ばすと、離れた場所の偶然まで連鎖になる
+      const followsUp = cleared.removedColumns.some((x) => this.#chainColumns.has(x))
+      this.chain = followsUp ? this.chain + 1 : 1
       this.score += scoreFor(cleared.removed, this.chain)
       this.#chainColumns = new Set(cleared.removedColumns)
       return false
     }
     if (this.chain > 0) {
-      // 消した跡へ向かう落下が止まったら、そこで連鎖は途切れる。
-      // 盤面のどこかが動いているだけでは、無関係な消去まで連鎖に数えてしまう
-      const stillFalling = [...this.#chainColumns].some((x) => fall.unsettledColumns.has(x))
-      if (!stillFalling && cleared.pending === 0) {
+      // 消した跡へ向かう落下が止まったら、そこで連鎖は途切れる
+      const stillMoving = [...this.#chainColumns].some((x) => fall.unsupportedColumns.has(x))
+      if (!stillMoving && cleared.pending === 0) {
         this.chain = 0
         this.#chainColumns.clear()
       }
