@@ -1,8 +1,14 @@
+import { splitIntoChunks, type CellPos } from './chunks'
 import { GRID_WIDTH, type Grid } from './grid'
 
-export interface CellPos {
-  x: number
-  y: number
+export interface FallResult {
+  /** このティックで落ちたセルの、移動後の位置 */
+  landed: CellPos[]
+  /**
+   * 支えを失った塊がまだ残っているか。
+   * 落下も震えも止まって初めて盤面は静まる。連鎖が続いているかの判断に使う。
+   */
+  unsettled: boolean
 }
 
 /**
@@ -12,18 +18,10 @@ export interface CellPos {
  */
 export const FLOAT_TICKS_BEFORE_FALL = 8
 
-interface Chunk {
-  cells: CellPos[]
-  /** 窓の上へ続いている。全体が見えないので動かせない */
-  openTop: boolean
-  /** 窓の下へ足が出ている。その先は未生成かもしれないので、支えがあるものとして扱う */
-  openBottom: boolean
-}
-
 /**
  * 支えを失った塊を 1 マスだけ落とす。
  *
- * 落ちる単位は「同じ色で上下左右につながったひとかたまり」。
+ * 落ちる単位は同じ色でつながったひとかたまり（[[splitIntoChunks]]）。
  * 色が違うブロックは互いを支えるが、一緒には落ちない。原作でブロックを 1 つ掘ると
  * 同色の塊がまとめて降ってくるのはこのため。
  *
@@ -39,32 +37,33 @@ interface Chunk {
  * 窓からはみ出した塊は動かさない。空だと決めつけると盤面が丸ごと落ちてしまうし、
  * 塊を窓で切って落とすと半分だけが落ちて穴が空く。
  *
- * @returns 落ちたセルの移動後の位置
  */
-export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
+export function stepGravity(grid: Grid, fromY: number, toY: number): FallResult {
   const top = Math.max(0, fromY)
   const key = (x: number, y: number) => y * GRID_WIDTH + x
-
-  const { chunks, chunkOf } = splitIntoChunks(grid, top, toY, key)
+  const { chunks, idAt } = splitIntoChunks(grid, top, toY)
 
   // 真下で接している塊。「支えられている」も「動けない」も、この関係を伝って上へ広がる
   const riders: number[][] = chunks.map(() => [])
-  chunks.forEach((chunk, id) => {
+  const footed = chunks.map((chunk, id) => {
+    let openBottom = false
     for (const { x, y } of chunk.cells) {
       const below = y + 1
       if (below > toY) {
-        chunk.openBottom = true
+        // 窓の下は未生成かもしれない。支えがあるものとして扱う
+        openBottom = true
         continue
       }
       if (grid.at(x, below) === null) continue
-      const belowId = chunkOf.get(key(x, below))
+      const belowId = idAt(x, below)
       if (belowId === undefined || belowId === id) continue
       riders[belowId]!.push(id)
     }
+    return openBottom
   })
 
   const grounded = spread(
-    chunks.map((chunk) => chunk.openTop || chunk.openBottom),
+    chunks.map((chunk, id) => chunk.openTop || footed[id] === true),
     riders,
   )
 
@@ -84,62 +83,26 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
     }
   })
 
-  // このティックで動けない塊。猶予の最中のものと、その上に乗っているものも動けない
+  // このティックで動けない塊。猶予の最中のものと、その上に乗っているものも動けない。
+  // 消えるのを待っているブロックも、消えるまではその場に留まる
   const held = spread(
-    chunks.map((_, id) => grounded[id] === true || floatTicks[id]! <= FLOAT_TICKS_BEFORE_FALL),
+    chunks.map(
+      (chunk, id) =>
+        grounded[id] === true ||
+        floatTicks[id]! <= FLOAT_TICKS_BEFORE_FALL ||
+        isClearing(grid, chunk.cells),
+    ),
     riders,
   )
 
-  return applyFall(grid, chunks, held, top, toY, key)
+  return {
+    landed: applyFall(grid, chunks, held, top, toY, key),
+    unsettled: grounded.includes(false),
+  }
 }
 
-/** 同じ色でつながったセルをひとかたまりにまとめる */
-function splitIntoChunks(
-  grid: Grid,
-  top: number,
-  toY: number,
-  key: (x: number, y: number) => number,
-): { chunks: Chunk[]; chunkOf: Map<number, number> } {
-  const chunkOf = new Map<number, number>()
-  const chunks: Chunk[] = []
-
-  for (let y = top; y <= toY; y++) {
-    for (let x = 0; x < GRID_WIDTH; x++) {
-      const cell = grid.at(x, y)
-      if (cell === null || chunkOf.has(key(x, y))) continue
-
-      const id = chunks.length
-      const cells: CellPos[] = []
-      const stack: CellPos[] = [{ x, y }]
-      let openTop = false
-      chunkOf.set(key(x, y), id)
-      while (stack.length > 0) {
-        const pos = stack.pop()!
-        cells.push(pos)
-        for (const [nx, ny] of [
-          [pos.x + 1, pos.y],
-          [pos.x - 1, pos.y],
-          [pos.x, pos.y + 1],
-          [pos.x, pos.y - 1],
-        ] as const) {
-          if (nx < 0 || nx >= GRID_WIDTH || ny > toY) continue
-          if (ny < top) {
-            // 窓の外までつながっているかだけ見て、探索は広げない
-            const above = grid.at(nx, ny)
-            if (above !== null && above.color === cell.color) openTop = true
-            continue
-          }
-          if (chunkOf.has(key(nx, ny))) continue
-          const neighbor = grid.at(nx, ny)
-          if (neighbor === null || neighbor.color !== cell.color) continue
-          chunkOf.set(key(nx, ny), id)
-          stack.push({ x: nx, y: ny })
-        }
-      }
-      chunks.push({ cells, openTop, openBottom: false })
-    }
-  }
-  return { chunks, chunkOf }
+function isClearing(grid: Grid, cells: CellPos[]): boolean {
+  return cells.some((pos) => (grid.at(pos.x, pos.y)?.clearTicks ?? 0) > 0)
 }
 
 /** 種になった塊から、その上に乗っている塊へ状態を配る */
@@ -160,7 +123,7 @@ function spread(seeds: boolean[], riders: number[][]): boolean[] {
 /** 動ける塊を 1 マス下へ移す */
 function applyFall(
   grid: Grid,
-  chunks: Chunk[],
+  chunks: { cells: CellPos[] }[],
   held: boolean[],
   top: number,
   toY: number,
@@ -183,7 +146,7 @@ function applyFall(
     // ブロックを消してしまうより、その場に戻す方がまだ被害が小さい
     const blocked = grid.at(pos.x, pos.y + 1) !== null
     const to = blocked ? pos : { x: pos.x, y: pos.y + 1 }
-    grid.set(to.x, to.y, { color, fell: !blocked, floatTicks })
+    grid.set(to.x, to.y, { color, fell: !blocked, floatTicks, clearTicks: 0 })
     if (!blocked) landed.push(to)
   }
 

@@ -2,7 +2,7 @@
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 /** ブロックの色数。色は見た目ではなくルールの一部で、同色 4 つ以上がつながると消える */
-export const COLOR_COUNT = 5
+export const COLOR_COUNT = 4
 
 export type Cell = {
   color: number
@@ -14,6 +14,12 @@ export type Cell = {
    * 原作と同じく一拍おいてから落とすための猶予で、その間ブロックは震えて予告する。
    */
   floatTicks: number
+  /**
+   * 消えるまでの残りティック。0 なら消える予定は無い。
+   * 4 つ揃った瞬間に消すと何が起きたか分からないので、点滅する間だけ盤面に残す。
+   * この間ブロックは落ちも消えもしない第 3 の状態にいる。
+   */
+  clearTicks: number
 } | null
 
 export const DIRECTION_DELTA: Record<Direction, { dx: number; dy: number }> = {

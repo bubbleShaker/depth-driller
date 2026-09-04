@@ -1,6 +1,9 @@
-import { stepGravity, type CellPos } from './gravity'
+import type { CellPos } from './chunks'
+import { stepClear } from './clear'
+import { stepGravity } from './gravity'
 import { GRID_WIDTH, Grid, SURFACE_ROWS } from './grid'
 import { decideAction } from './player'
+import { createTerrain } from './terrain'
 import type { Direction } from './types'
 
 /** ブロックが 1 マス落ちるのにかかる時間。短いほど落石が怖くなる */
@@ -28,6 +31,11 @@ const LOOKAHEAD = GRAVITY_MARGIN * 2
 
 export type GameState = 'playing' | 'gameover'
 
+/** 連鎖するほど 1 個あたりの価値が上がる。まとめて消す組み立てに報いるため */
+function scoreFor(removed: number, chain: number): number {
+  return removed * 10 * chain
+}
+
 /**
  * ルールの本体。Canvas も DOM も知らないので、盤面の挙動だけを単体テストできる。
  * 呼び出し側は毎フレーム update に経過時間と押されている方向を渡す。
@@ -40,6 +48,13 @@ export class Game {
   state: GameState = 'playing'
   /** 到達した最大の深さ。潜って戻っても減らない */
   maxDepth = 0
+  /** 消したブロックで稼いだ点。深さとは別勘定 */
+  score = 0
+  /**
+   * いま何連鎖目か。消えた跡が落ちてまた消えると伸びる。
+   * 盤面が静まると 0 に戻る
+   */
+  chain = 0
 
   /** 描画がマス目の間を埋めるための、動く前の位置 */
   #prevX: number
@@ -49,8 +64,8 @@ export class Game {
   #fallElapsed = 0
   #digTarget: CellPos | null = null
 
-  constructor(random?: () => number) {
-    this.grid = new Grid(random)
+  constructor(random?: () => number, clusterChance?: number) {
+    this.grid = new Grid(createTerrain(random, clusterChance))
     this.x = Math.floor(GRID_WIDTH / 2)
     this.y = SURFACE_ROWS - 1
     this.#prevX = this.x
@@ -122,19 +137,31 @@ export class Game {
     // 生成はティックごとにやり直さないと、深くなった窓が未生成域にはみ出す
     this.grid.ensureDepth(this.y + LOOKAHEAD)
 
+    const top = this.y - GRAVITY_MARGIN
+    const bottom = this.y + GRAVITY_MARGIN
+
     // 落ちるかどうかは、ブロックが動く前の足元で決める。
     // ブロックと同じ速さで落ちている間は、真上から追いつかれない
     const falls = this.isAirborne
-    const landed = stepGravity(this.grid, this.y - GRAVITY_MARGIN, this.y + GRAVITY_MARGIN)
+    const fall = stepGravity(this.grid, top, bottom)
 
     if (falls && !this.grid.isBlocked(this.x, this.y + 1)) {
       this.#moveTo(this.x, this.y + 1, FALL_INTERVAL_MS)
     }
 
     // 落ちてきたブロックが自分のいるマスに入った = 潰された
-    if (landed.some((p) => p.x === this.x && p.y === this.y)) {
+    if (fall.landed.some((p) => p.x === this.x && p.y === this.y)) {
       this.state = 'gameover'
       return true
+    }
+
+    const cleared = stepClear(this.grid, top, bottom)
+    if (cleared.removed > 0) {
+      this.chain += 1
+      this.score += scoreFor(cleared.removed, this.chain)
+    } else if (!fall.unsettled && cleared.pending === 0) {
+      // 落ちるものも消えるものも無くなった。ここで連鎖は途切れる
+      this.chain = 0
     }
     return false
   }

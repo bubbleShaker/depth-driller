@@ -52,14 +52,14 @@ describe('Game', () => {
   it('落ちてきたブロックに潰されるとゲームオーバー', () => {
     const game = solidGround()
     // 頭上に、もう浮いていられないブロックを置く
-    game.grid.set(game.x, game.y - 1, { color: 1, fell: false, floatTicks: FLOAT_TICKS_BEFORE_FALL })
+    game.grid.set(game.x, game.y - 1, { color: 1, fell: false, floatTicks: FLOAT_TICKS_BEFORE_FALL, clearTicks: 0 })
     game.update(FALL_INTERVAL_MS, null)
     expect(game.state).toBe('gameover')
   })
 
   it('ゲームオーバー後は何をしても動かない', () => {
     const game = solidGround()
-    game.grid.set(game.x, game.y - 1, { color: 1, fell: false, floatTicks: FLOAT_TICKS_BEFORE_FALL })
+    game.grid.set(game.x, game.y - 1, { color: 1, fell: false, floatTicks: FLOAT_TICKS_BEFORE_FALL, clearTicks: 0 })
     game.update(FALL_INTERVAL_MS, null)
     const { x, y } = game
     game.update(FALL_INTERVAL_MS * 10, 'down')
@@ -96,7 +96,7 @@ describe('Game', () => {
     const game = solidGround()
     const column = game.x
     for (const dy of [1, 2, 3]) game.grid.set(column, game.y + dy, null)
-    game.grid.set(column, game.y - 1, { color: 1, fell: false, floatTicks: FLOAT_TICKS_BEFORE_FALL })
+    game.grid.set(column, game.y - 1, { color: 1, fell: false, floatTicks: FLOAT_TICKS_BEFORE_FALL, clearTicks: 0 })
 
     // ブロックと同じ速さで落ちるので、頭の上にあっても潰されない
     game.update(FALL_INTERVAL_MS, null)
@@ -124,6 +124,18 @@ describe('Game', () => {
       game.update(16, escaping ? 'down' : 'right')
     }
     expect(game.state).toBe('playing')
+  })
+
+  it('掘り進めばブロックが揃って消え、点が入る', () => {
+    // 消えないなら地形の色の配り方（terrain）が壊れている。実測で 30 シード中 15 は点が入る
+    const game = new Game(seededRandom(1))
+    for (let t = 0; t < 30000 && game.state === 'playing'; t += 16) {
+      const above = game.grid.at(game.x, game.y - 1)
+      const escaping = above !== null && above.floatTicks > 0
+      const phase = Math.floor(t / 1200) % 4
+      game.update(16, escaping ? 'down' : phase === 3 ? 'right' : 'down')
+    }
+    expect(game.score).toBeGreaterThan(0)
   })
 
   it('潜った後に浅い場所へ戻っても最大深度は減らない', () => {

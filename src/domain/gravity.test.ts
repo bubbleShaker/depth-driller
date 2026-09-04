@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FLOAT_TICKS_BEFORE_FALL, stepGravity } from './gravity'
 import { GRID_WIDTH, Grid } from './grid'
+import { createTerrain } from './terrain'
 import { countBlocks, dumpGrid, makeGrid, seededRandom } from './testing'
 
 /**
@@ -189,7 +190,7 @@ describe('stepGravity', () => {
 
   it('掘った跡を落とし続けてもブロックの総数は変わらない', () => {
     const random = seededRandom(7)
-    const grid = new Grid(random)
+    const grid = new Grid(createTerrain(random))
     grid.ensureDepth(20)
     for (let i = 0; i < 40; i++) {
       grid.set(Math.floor(random() * GRID_WIDTH), 2 + Math.floor(random() * 18), null)
@@ -209,8 +210,8 @@ describe('stepGravity', () => {
     ])
     // 猶予のあいだは何も動かず、使い切った次のティックで落ちる
     for (let i = 0; i < FLOAT_TICKS_BEFORE_FALL; i++) {
-      expect(stepGravity(grid, 0, 1)).toEqual([])
+      expect(stepGravity(grid, 0, 1).landed).toEqual([])
     }
-    expect(stepGravity(grid, 0, 1)).toEqual([{ x: 3, y: 1 }])
+    expect(stepGravity(grid, 0, 1).landed).toEqual([{ x: 3, y: 1 }])
   })
 })

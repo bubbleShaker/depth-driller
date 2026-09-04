@@ -17,7 +17,11 @@ const canvas = required<HTMLCanvasElement>('#board')
 const stage = required<HTMLElement>('#stage')
 const pad = required<HTMLElement>('#pad')
 const depthLabel = required<HTMLElement>('#depth')
+const scoreLabel = required<HTMLElement>('#score')
+const chainBanner = required<HTMLElement>('#chain')
+const chainCount = required<HTMLElement>('#chain-count')
 const finalDepthLabel = required<HTMLElement>('#final-depth')
+const finalScoreLabel = required<HTMLElement>('#final-score')
 const overlay = required<HTMLElement>('#overlay')
 const retryButton = required<HTMLButtonElement>('#retry')
 
@@ -52,6 +56,8 @@ function restart(): void {
 retryButton.addEventListener('click', restart)
 
 let shownDepth = -1
+let shownScore = -1
+let shownChain = -1
 let shownGameover = false
 let lastFrame = performance.now()
 
@@ -68,11 +74,22 @@ function frame(now: number): void {
     shownDepth = game.maxDepth
     depthLabel.textContent = String(shownDepth)
   }
+  if (game.score !== shownScore) {
+    shownScore = game.score
+    scoreLabel.textContent = String(shownScore)
+  }
+  if (game.chain !== shownChain) {
+    shownChain = game.chain
+    // 1 連鎖はただ消えただけ。2 以上から誇らしく出す
+    chainBanner.hidden = shownChain < 2
+    if (shownChain >= 2) chainCount.textContent = String(shownChain)
+  }
   const isGameover = game.state === 'gameover'
   if (isGameover !== shownGameover) {
     shownGameover = isGameover
     overlay.hidden = !isGameover
     finalDepthLabel.textContent = String(game.maxDepth)
+    finalScoreLabel.textContent = String(game.score)
   }
   for (const [dir, key] of padKeys) {
     key.classList.toggle('is-active', dir === direction)
