@@ -1,20 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { DIG_DURATION_MS, FALL_INTERVAL_MS, Game } from './game'
 import { FLOAT_TICKS_BEFORE_FALL } from './gravity'
+import { seededRandom } from './testing'
 
 /** 色を 1 種類に固定した盤面。落下や消去の条件を意図した形だけに絞れる */
 const solidGround = () => new Game(() => 0)
-
-/** 盤面を固定して長く回すためのシード付き乱数 */
-function mulberry32(seed: number): () => number {
-  let a = seed
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 describe('Game', () => {
   it('地表に立って始まる', () => {
@@ -117,12 +107,23 @@ describe('Game', () => {
 
   it('下を押し続けている限りは潜り続けられる', () => {
     // 掘って落ちるだけで潰されるようなら、そもそもゲームにならない
-    const game = new Game(mulberry32(1))
+    const game = new Game(seededRandom(1))
     for (let t = 0; t < 20000 && game.state === 'playing'; t += 16) {
       game.update(16, 'down')
     }
     expect(game.state).toBe('playing')
     expect(game.maxDepth).toBeGreaterThan(60)
+  })
+
+  it('頭上の震えを見て逃げれば、横に掘り進んでも生き延びられる', () => {
+    // 震えはブロックが落ちてくる唯一の予告。これに反応して助からないなら理不尽なゲームになる
+    const game = new Game(seededRandom(3))
+    for (let t = 0; t < 20000 && game.state === 'playing'; t += 16) {
+      const above = game.grid.at(game.x, game.y - 1)
+      const escaping = above !== null && above.floatTicks > 0
+      game.update(16, escaping ? 'down' : 'right')
+    }
+    expect(game.state).toBe('playing')
   })
 
   it('潜った後に浅い場所へ戻っても最大深度は減らない', () => {

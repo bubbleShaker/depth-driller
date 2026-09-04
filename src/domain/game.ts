@@ -5,8 +5,13 @@ import type { Direction } from './types'
 
 /** ブロックが 1 マス落ちるのにかかる時間。短いほど落石が怖くなる */
 export const FALL_INTERVAL_MS = 90
-export const MOVE_DURATION_MS = 110
-export const DIG_DURATION_MS = 150
+/**
+ * 掘る・歩くにかかる時間。
+ * 落下の間隔より長くすると、絵がまだ元のマスにいる間に隣で潰されることが起きる。
+ * 当たり判定と見た目がずれると死に納得できないので、落下と同じ刻みに揃える。
+ */
+export const MOVE_DURATION_MS = FALL_INTERVAL_MS
+export const DIG_DURATION_MS = FALL_INTERVAL_MS
 
 /**
  * 重力を計算する上下の窓。
@@ -19,7 +24,7 @@ const GRAVITY_MARGIN = 24
  * 未生成の行は「空」と見分けがつかないので、重力の窓と描画の範囲の
  * どちらよりも深くまで作っておかないと、盤面が下へ抜け落ちる。
  */
-const LOOKAHEAD = 48
+const LOOKAHEAD = GRAVITY_MARGIN * 2
 
 export type GameState = 'playing' | 'gameover'
 
@@ -100,7 +105,11 @@ export class Game {
     }
 
     if (dir !== null) this.facing = dir
-    if (dir !== null && !this.#isBusy() && !this.isAirborne) this.#startAction(dir)
+    if (dir === null || this.#isBusy()) return
+    // 落ちている最中にできるのは横へ逃げることだけ。
+    // 真下を掘っても落下は速くならないし、何もできないまま着地して潰されるのは理不尽
+    const sideways = dir === 'left' || dir === 'right'
+    if (!this.isAirborne || sideways) this.#startAction(dir)
   }
 
   #isBusy(): boolean {

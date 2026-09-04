@@ -1,3 +1,4 @@
+import type { GameState } from '../domain/game'
 import { FLOAT_TICKS_BEFORE_FALL } from '../domain/gravity'
 import { GRID_WIDTH, SURFACE_ROWS } from '../domain/grid'
 import type { Cell, Direction } from '../domain/types'
@@ -16,7 +17,7 @@ export interface BoardView {
   readonly depth: number
   readonly fallProgress: number
   readonly digTarget: { readonly x: number; readonly y: number } | null
-  readonly state: 'playing' | 'gameover'
+  readonly state: GameState
 }
 
 /** プレイヤーを画面のどのあたりに置くか。下を広く見せたいので上寄り */
@@ -90,7 +91,7 @@ export class Renderer {
         const drawRow = block.fell ? y - 1 + game.fallProgress : y
         // 支えを失って浮いているブロックは震わせる。落ちてくる前の唯一の予告なので、
         // 落下が近いほど揺れを大きくして「そろそろ来る」を伝える
-        const urgency = block.fell ? 0 : block.floatTicks / FLOAT_TICKS_BEFORE_FALL
+        const urgency = block.fell ? 0 : Math.min(1, block.floatTicks / FLOAT_TICKS_BEFORE_FALL)
         const wobble = urgency * Math.sin(performance.now() / 26 + y) * cell * 0.07
         this.#drawBlock(this.#originX + x * cell + wobble, toPx(drawRow), block.color)
       }

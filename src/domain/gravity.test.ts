@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FLOAT_TICKS_BEFORE_FALL, stepGravity } from './gravity'
-import { dumpGrid, makeGrid } from './testing'
+import { GRID_WIDTH, Grid } from './grid'
+import { countBlocks, dumpGrid, makeGrid, seededRandom } from './testing'
 
 /**
  * 窓の下端は「未生成の土に支えられている」扱いなので、
@@ -163,6 +164,41 @@ describe('stepGravity', () => {
       '........',
       '........',
     ])
+  })
+
+  it('猶予中の塊の上に落下中の塊が乗っていてもブロックは消えない', () => {
+    const grid = makeGrid([
+      '...0....', //
+      '...3....',
+      '........',
+      '........',
+    ])
+    // 上はもう落ち始めていて、下はまだ浮いているだけ、という食い違いを作る
+    grid.at(3, 0)!.floatTicks = FLOAT_TICKS_BEFORE_FALL + 2
+    grid.at(3, 1)!.floatTicks = 1
+
+    stepGravity(grid, 0, 2)
+
+    expect(dumpGrid(grid, 4)).toEqual([
+      '...0....', //
+      '...3....',
+      '........',
+      '........',
+    ])
+  })
+
+  it('掘った跡を落とし続けてもブロックの総数は変わらない', () => {
+    const random = seededRandom(7)
+    const grid = new Grid(random)
+    grid.ensureDepth(20)
+    for (let i = 0; i < 40; i++) {
+      grid.set(Math.floor(random() * GRID_WIDTH), 2 + Math.floor(random() * 18), null)
+    }
+    const before = countBlocks(grid, 0, 20)
+
+    for (let tick = 0; tick < 200; tick++) stepGravity(grid, 0, 20)
+
+    expect(countBlocks(grid, 0, 20)).toBe(before)
   })
 
   it('落ちた先の位置を返す', () => {

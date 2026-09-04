@@ -12,6 +12,14 @@ export interface CellPos {
  */
 export const FLOAT_TICKS_BEFORE_FALL = 8
 
+interface Chunk {
+  cells: CellPos[]
+  /** 窓の上へ続いている。全体が見えないので動かせない */
+  openTop: boolean
+  /** 窓の下へ足が出ている。その先は未生成かもしれないので、支えがあるものとして扱う */
+  openBottom: boolean
+}
+
 /**
  * 支えを失った塊を 1 マスだけ落とす。
  *
@@ -19,10 +27,17 @@ export const FLOAT_TICKS_BEFORE_FALL = 8
  * 色が違うブロックは互いを支えるが、一緒には落ちない。原作でブロックを 1 つ掘ると
  * 同色の塊がまとめて降ってくるのはこのため。
  *
+ * 塊には混ぜてはいけない 2 つの状態がある。
+ * - **接地**: 支えがある。浮いている時間がリセットされ、震えも止まる
+ * - **停止**: このティックでは動かない。接地しているものに加えて、
+ *   まだ落下の猶予中のものと、その上に乗っているものが含まれる
+ *
+ * 2 つを 1 つの真偽値で兼ねると、猶予中で動かない塊の上に落下中の塊が重なり、
+ * 埋まっているマスへ書き込んでブロックが消える。
+ *
  * fromY..toY は計算する窓。窓の外のことは分からないので、上下どちらであれ
- * 窓からはみ出した塊は「支えられている」ものとして動かさない。
- * 空だと決めつけると盤面が丸ごと落ちてしまうし、塊を窓で切って落とすと
- * 半分だけが落ちて穴が空く。窓はプレイヤーの周りに十分な余白を取って渡すこと。
+ * 窓からはみ出した塊は動かさない。空だと決めつけると盤面が丸ごと落ちてしまうし、
+ * 塊を窓で切って落とすと半分だけが落ちて穴が空く。
  *
  * @returns 落ちたセルの移動後の位置
  */
@@ -30,21 +45,74 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
   const top = Math.max(0, fromY)
   const key = (x: number, y: number) => y * GRID_WIDTH + x
 
-  // 窓の中のブロックを同色の塊に分ける
-  const componentOf = new Map<number, number>()
-  const components: CellPos[][] = []
-  /** 窓の上へ続いている塊。全体が見えていないので落とせない */
-  const openTop: boolean[] = []
+  const { chunks, chunkOf } = splitIntoChunks(grid, top, toY, key)
+
+  // 真下で接している塊。「支えられている」も「動けない」も、この関係を伝って上へ広がる
+  const riders: number[][] = chunks.map(() => [])
+  chunks.forEach((chunk, id) => {
+    for (const { x, y } of chunk.cells) {
+      const below = y + 1
+      if (below > toY) {
+        chunk.openBottom = true
+        continue
+      }
+      if (grid.at(x, below) === null) continue
+      const belowId = chunkOf.get(key(x, below))
+      if (belowId === undefined || belowId === id) continue
+      riders[belowId]!.push(id)
+    }
+  })
+
+  const grounded = spread(
+    chunks.map((chunk) => chunk.openTop || chunk.openBottom),
+    riders,
+  )
+
+  // 浮いている時間は塊ごとに揃える。合体した塊が別々のタイミングで落ちるとちぎれる
+  const floatTicks = chunks.map((chunk, id) => {
+    if (grounded[id] === true) return 0
+    const shortest = chunk.cells.reduce(
+      (min, pos) => Math.min(min, grid.at(pos.x, pos.y)?.floatTicks ?? 0),
+      Number.POSITIVE_INFINITY,
+    )
+    return (Number.isFinite(shortest) ? shortest : 0) + 1
+  })
+  chunks.forEach((chunk, id) => {
+    for (const pos of chunk.cells) {
+      const cell = grid.at(pos.x, pos.y)
+      if (cell !== null) cell.floatTicks = floatTicks[id]!
+    }
+  })
+
+  // このティックで動けない塊。猶予の最中のものと、その上に乗っているものも動けない
+  const held = spread(
+    chunks.map((_, id) => grounded[id] === true || floatTicks[id]! <= FLOAT_TICKS_BEFORE_FALL),
+    riders,
+  )
+
+  return applyFall(grid, chunks, held, top, toY, key)
+}
+
+/** 同じ色でつながったセルをひとかたまりにまとめる */
+function splitIntoChunks(
+  grid: Grid,
+  top: number,
+  toY: number,
+  key: (x: number, y: number) => number,
+): { chunks: Chunk[]; chunkOf: Map<number, number> } {
+  const chunkOf = new Map<number, number>()
+  const chunks: Chunk[] = []
+
   for (let y = top; y <= toY; y++) {
     for (let x = 0; x < GRID_WIDTH; x++) {
       const cell = grid.at(x, y)
-      if (cell === null || componentOf.has(key(x, y))) continue
+      if (cell === null || chunkOf.has(key(x, y))) continue
 
-      const id = components.length
+      const id = chunks.length
       const cells: CellPos[] = []
       const stack: CellPos[] = [{ x, y }]
-      let touchesTop = false
-      componentOf.set(key(x, y), id)
+      let openTop = false
+      chunkOf.set(key(x, y), id)
       while (stack.length > 0) {
         const pos = stack.pop()!
         cells.push(pos)
@@ -58,82 +126,65 @@ export function stepGravity(grid: Grid, fromY: number, toY: number): CellPos[] {
           if (ny < top) {
             // 窓の外までつながっているかだけ見て、探索は広げない
             const above = grid.at(nx, ny)
-            if (above !== null && above.color === cell.color) touchesTop = true
+            if (above !== null && above.color === cell.color) openTop = true
             continue
           }
-          if (componentOf.has(key(nx, ny))) continue
+          if (chunkOf.has(key(nx, ny))) continue
           const neighbor = grid.at(nx, ny)
           if (neighbor === null || neighbor.color !== cell.color) continue
-          componentOf.set(key(nx, ny), id)
+          chunkOf.set(key(nx, ny), id)
           stack.push({ x: nx, y: ny })
         }
       }
-      components.push(cells)
-      openTop.push(touchesTop)
+      chunks.push({ cells, openTop, openBottom: false })
     }
   }
+  return { chunks, chunkOf }
+}
 
-  // 地面に足がついている塊から、その上に乗っている塊へ「支えられている」を伝える
-  const supported = Array.from<boolean>({ length: components.length }).fill(false)
-  const riders: number[][] = components.map(() => [])
-  const settled: number[] = []
-  components.forEach((cells, id) => {
-    if (openTop[id] === true) {
-      supported[id] = true
-      settled.push(id)
-      return
-    }
-    for (const { x, y } of cells) {
-      const below = y + 1
-      if (below > toY) {
-        // 窓の外は未知。落とさない方に倒す
-        if (!supported[id]) {
-          supported[id] = true
-          settled.push(id)
-        }
-        continue
-      }
-      const cellBelow = grid.at(x, below)
-      if (cellBelow === null) continue
-      const belowId = componentOf.get(key(x, below))
-      if (belowId === undefined || belowId === id) continue
-      riders[belowId]!.push(id)
-    }
-  })
-  while (settled.length > 0) {
-    const id = settled.pop()!
+/** 種になった塊から、その上に乗っている塊へ状態を配る */
+function spread(seeds: boolean[], riders: number[][]): boolean[] {
+  const marked = [...seeds]
+  const queue = marked.flatMap((isMarked, id) => (isMarked ? [id] : []))
+  while (queue.length > 0) {
+    const id = queue.pop()!
     for (const rider of riders[id]!) {
-      if (supported[rider]) continue
-      supported[rider] = true
-      settled.push(rider)
+      if (marked[rider] === true) continue
+      marked[rider] = true
+      queue.push(rider)
     }
   }
+  return marked
+}
 
-  // 落ちるセルを一度すべて消してから書き戻す。
-  // 1 つずつ動かすと、同じ塊の上のセルが下のセルを踏み潰してしまう
+/** 動ける塊を 1 マス下へ移す */
+function applyFall(
+  grid: Grid,
+  chunks: Chunk[],
+  held: boolean[],
+  top: number,
+  toY: number,
+  key: (x: number, y: number) => number,
+): CellPos[] {
+  // 一度すべて消してから書き戻す。1 つずつ動かすと、同じ塊の上のセルが下のセルを踏み潰す
   const falling: { pos: CellPos; color: number; floatTicks: number }[] = []
-  components.forEach((cells, id) => {
-    for (const pos of cells) {
+  chunks.forEach((chunk, id) => {
+    if (held[id] === true) return
+    for (const pos of chunk.cells) {
       const cell = grid.at(pos.x, pos.y)
-      if (cell === null) continue
-      if (supported[id] === true) {
-        cell.floatTicks = 0
-        continue
-      }
-      // 浮いている時間を数え、猶予を超えたものだけが落ち始める
-      cell.floatTicks += 1
-      if (cell.floatTicks > FLOAT_TICKS_BEFORE_FALL) {
-        falling.push({ pos, color: cell.color, floatTicks: cell.floatTicks })
-      }
+      if (cell !== null) falling.push({ pos, color: cell.color, floatTicks: cell.floatTicks })
     }
   })
   for (const { pos } of falling) grid.set(pos.x, pos.y, null)
 
   const landed: CellPos[] = []
   for (const { pos, color, floatTicks } of falling) {
-    const to = { x: pos.x, y: pos.y + 1 }
-    grid.set(to.x, to.y, { color, fell: true, floatTicks })
-    landed.push(to)
+    // 落ちる先が空いていないなら判定のどこかが破綻している。
+    // ブロックを消してしまうより、その場に戻す方がまだ被害が小さい
+    const blocked = grid.at(pos.x, pos.y + 1) !== null
+    const to = blocked ? pos : { x: pos.x, y: pos.y + 1 }
+    grid.set(to.x, to.y, { color, fell: !blocked, floatTicks })
+    if (!blocked) landed.push(to)
   }
 
   // 落ちなかったセルの「落下中」表示を消す
